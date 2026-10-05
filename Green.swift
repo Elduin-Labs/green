@@ -42,15 +42,15 @@ final class StageView: NSView {
 
     private let margin: CGFloat = 40
     private let fightLength = 240
-    private var ground: CGFloat { mode == .fight ? 6 : bounds.height / 2 - 50 }
+    private var ground: CGFloat { bounds.height / 2 - 50 }
 
     enum Mode {
         case stand   // both stand in the middle of the screen
         case walk    // both walk together back and forth across the middle
-        case fight   // Green walks along the bottom, and the Chosen One comes and beats him
+        case fight   // they fight right away, and the Chosen One wins. Then it starts over.
     }
 
-    var mode = Mode.walk {
+    var mode = Mode.fight {
         didSet { reset() }
     }
 
@@ -61,7 +61,7 @@ final class StageView: NSView {
                                 halo: NSColor(calibratedWhite: 1, alpha: 0.9), name: "The Chosen One")
 
     private var scene = Scene.solo
-    private var soloLeft = Int.random(in: 480...900)   // 8 to 15 seconds of Green alone
+    private var soloLeft = Int.random(in: 480...900)   // Green walks alone for a while first
     private var t = 0                                  // ticks into the current scene
     private var originFacing: CGFloat = 1              // which way the Chosen One walks home
     private var greenBase: CGFloat = 0
@@ -95,18 +95,24 @@ final class StageView: NSView {
             chosen.facing = 1
             chosen.pose.phase = 2   // so their legs don't swing in exactly the same step
         case .fight:
-            green.x = 200
-            green.facing = 1
-            soloLeft = Int.random(in: 480...900)
-            t = 0
-            scene = .solo
+            // They start fighting right here in the middle.
+            green.x = w / 2 - 38
+            chosen.x = w / 2 + 38
+            originFacing = 1
+            startFight()
         }
         needsDisplay = true
     }
 
+    private var laidOutSize = NSSize.zero
+
     override func layout() {
         super.layout()
-        if mode != .fight { reset() }
+        // Only start over when the screen size is first known or changes, not on every layout.
+        if bounds.size != laidOutSize {
+            laidOutSize = bounds.size
+            reset()
+        }
     }
 
     /// Both of them walk the same way, side by side, and turn around together at the edges.
@@ -289,7 +295,7 @@ final class StageView: NSView {
         green.facing = side
         green.pose = Pose()
         green.alpha = 1
-        soloLeft = Int.random(in: 480...900)
+        soloLeft = Int.random(in: 120...300)   // a few seconds, then the Chosen One comes again
         t = 0
         scene = .solo
     }
@@ -455,9 +461,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.button?.title = "Green"
         let menu = NSMenu()
         let choices: [(String, StageView.Mode)] = [
+            ("Fight", .fight),
             ("Walk together", .walk),
             ("Stand in the middle", .stand),
-            ("Walk and fight", .fight),
         ]
         for (title, mode) in choices {
             let item = NSMenuItem(title: title, action: #selector(choose(_:)), keyEquivalent: "")
