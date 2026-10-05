@@ -42,7 +42,12 @@ final class StageView: NSView {
 
     private let margin: CGFloat = 40
     private let fightLength = 240
-    private let ground: CGFloat = 6
+    private var ground: CGFloat { standing ? bounds.height / 2 - 50 : 6 }
+
+    /// True: they just stand in the middle of the screen. False: they walk along the bottom and fight.
+    var standing = true {
+        didSet { standing ? stand() : walkAndFight() }
+    }
 
     private let green = Figure(x: 200, facing: 1,
                                color: NSColor(calibratedRed: 0.10, green: 0.85, blue: 0.20, alpha: 1),
@@ -65,7 +70,38 @@ final class StageView: NSView {
 
     // MARK: story
 
+    private func stand() {
+        let w = bounds.width
+        green.x = w / 2 - 55
+        green.facing = 1
+        green.alpha = 1
+        green.pose = Pose()
+        chosen.x = w / 2 + 55
+        chosen.facing = -1
+        chosen.alpha = 1
+        chosen.pose = Pose()
+        hit = 0
+        needsDisplay = true
+    }
+
+    private func walkAndFight() {
+        green.x = 200
+        green.facing = 1
+        green.alpha = 1
+        green.pose = Pose()
+        soloLeft = Int.random(in: 480...900)
+        t = 0
+        scene = .solo
+        needsDisplay = true
+    }
+
+    override func layout() {
+        super.layout()
+        if standing { stand() }
+    }
+
     func step() {
+        if standing { return }
         let w = bounds.width
         switch scene {
         case .solo:
@@ -235,7 +271,7 @@ final class StageView: NSView {
         dirtyRect.fill(using: .clear)
 
         if green.alpha > 0 { draw(green) }
-        if scene == .approach || scene == .fight || scene == .aftermath { draw(chosen) }
+        if standing || scene == .approach || scene == .fight || scene == .aftermath { draw(chosen) }
         if hit > 0 { drawBurst(at: hitPoint, size: hit) }
     }
 
@@ -253,6 +289,8 @@ final class StageView: NSView {
         let neckY = hipY + 34
         let shoulderY = neckY - 6
         let swing = sin(p.phase) * p.walk
+        // Standing still: legs and arms hang a little apart, so he doesn't look like a lollipop.
+        let idle = (1 - p.walk) * (1 - p.stance) * (1 - p.fall / (.pi / 2))
 
         let body = NSBezierPath()
         body.lineWidth = 5
@@ -266,6 +304,7 @@ final class StageView: NSView {
         for side: CGFloat in [1, -1] {
             var footX = swing * side * 16
             var footY = max(0, sin(side == 1 ? p.phase : p.phase + .pi)) * 4 * p.walk
+            footX += side * 8 * idle
             footX = lerp(footX, side == 1 ? 14 : -12, p.stance)
             footY = lerp(footY, 0, p.stance)
             if p.kick > 0 && side == 1 {
@@ -280,6 +319,7 @@ final class StageView: NSView {
         for side: CGFloat in [1, -1] {
             var handX = -swing * side * 13
             var handY = shoulderY - 20
+            handX += side * 11 * idle
             handX = lerp(handX, 10, p.stance)
             handY = lerp(handY, shoulderY - 14, p.stance)
             if side == p.punchArm && p.punch > 0 {
@@ -352,11 +392,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var view: StageView!
     var timer: Timer?
     var statusItem: NSStatusItem!
+    var standItem: NSMenuItem!
+    var fightItem: NSMenuItem!
+
+    @objc func chooseStand() {
+        view.standing = true
+        standItem.state = .on
+        fightItem.state = .off
+    }
+
+    @objc func chooseFight() {
+        view.standing = false
+        standItem.state = .off
+        fightItem.state = .on
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         guard let screen = NSScreen.main else { return }
         let area = screen.visibleFrame
-        let frame = NSRect(x: area.minX, y: area.minY, width: area.width, height: 130)
+        let frame = NSRect(x: area.minX, y: area.minY, width: area.width, height: area.height)
 
         window = NSWindow(contentRect: frame, styleMask: .borderless, backing: .buffered, defer: false)
         window.isOpaque = false
@@ -378,6 +432,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.title = "Green"
         let menu = NSMenu()
+        standItem = NSMenuItem(title: "Stand in the middle", action: #selector(chooseStand), keyEquivalent: "")
+        fightItem = NSMenuItem(title: "Walk and fight", action: #selector(chooseFight), keyEquivalent: "")
+        standItem.target = self
+        fightItem.target = self
+        standItem.state = .on
+        menu.addItem(standItem)
+        menu.addItem(fightItem)
+        menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Quit Green", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         statusItem.menu = menu
     }
