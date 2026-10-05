@@ -42,11 +42,16 @@ final class StageView: NSView {
 
     private let margin: CGFloat = 40
     private let fightLength = 240
-    private var ground: CGFloat { standing ? bounds.height / 2 - 50 : 6 }
+    private var ground: CGFloat { mode == .fight ? 6 : bounds.height / 2 - 50 }
 
-    /// True: they just stand in the middle of the screen. False: they walk along the bottom and fight.
-    var standing = true {
-        didSet { standing ? stand() : walkAndFight() }
+    enum Mode {
+        case stand   // both stand in the middle of the screen
+        case walk    // both walk together back and forth across the middle
+        case fight   // Green walks along the bottom, and the Chosen One comes and beats him
+    }
+
+    var mode = Mode.walk {
+        didSet { reset() }
     }
 
     private let green = Figure(x: 200, facing: 1,
@@ -70,38 +75,62 @@ final class StageView: NSView {
 
     // MARK: story
 
-    private func stand() {
+    private func reset() {
         let w = bounds.width
-        green.x = w / 2 - 55
-        green.facing = 1
         green.alpha = 1
         green.pose = Pose()
-        chosen.x = w / 2 + 55
-        chosen.facing = -1
         chosen.alpha = 1
         chosen.pose = Pose()
         hit = 0
-        needsDisplay = true
-    }
-
-    private func walkAndFight() {
-        green.x = 200
-        green.facing = 1
-        green.alpha = 1
-        green.pose = Pose()
-        soloLeft = Int.random(in: 480...900)
-        t = 0
-        scene = .solo
+        switch mode {
+        case .stand:
+            green.x = w / 2 - 55
+            green.facing = 1
+            chosen.x = w / 2 + 55
+            chosen.facing = -1
+        case .walk:
+            green.x = w / 2 - 55
+            chosen.x = w / 2 + 55
+            green.facing = 1
+            chosen.facing = 1
+            chosen.pose.phase = 2   // so their legs don't swing in exactly the same step
+        case .fight:
+            green.x = 200
+            green.facing = 1
+            soloLeft = Int.random(in: 480...900)
+            t = 0
+            scene = .solo
+        }
         needsDisplay = true
     }
 
     override func layout() {
         super.layout()
-        if standing { stand() }
+        if mode != .fight { reset() }
+    }
+
+    /// Both of them walk the same way, side by side, and turn around together at the edges.
+    private func walkTogether() {
+        let w = bounds.width
+        for f in [green, chosen] {
+            f.x += f.facing * 2.2
+            f.pose.phase += 0.16
+            f.pose.walk = 1
+        }
+        let right = max(green.x, chosen.x), left = min(green.x, chosen.x)
+        if right > w - margin { green.facing = -1; chosen.facing = -1 }
+        if left < margin { green.facing = 1; chosen.facing = 1 }
     }
 
     func step() {
-        if standing { return }
+        switch mode {
+        case .stand: return
+        case .walk:
+            walkTogether()
+            needsDisplay = true
+            return
+        case .fight: break
+        }
         let w = bounds.width
         switch scene {
         case .solo:
@@ -271,7 +300,7 @@ final class StageView: NSView {
         dirtyRect.fill(using: .clear)
 
         if green.alpha > 0 { draw(green) }
-        if standing || scene == .approach || scene == .fight || scene == .aftermath { draw(chosen) }
+        if mode != .fight || scene == .approach || scene == .fight || scene == .aftermath { draw(chosen) }
         if hit > 0 { drawBurst(at: hitPoint, size: hit) }
     }
 
@@ -392,19 +421,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var view: StageView!
     var timer: Timer?
     var statusItem: NSStatusItem!
-    var standItem: NSMenuItem!
-    var fightItem: NSMenuItem!
+    var items: [(NSMenuItem, StageView.Mode)] = []
 
-    @objc func chooseStand() {
-        view.standing = true
-        standItem.state = .on
-        fightItem.state = .off
-    }
-
-    @objc func chooseFight() {
-        view.standing = false
-        standItem.state = .off
-        fightItem.state = .on
+    @objc func choose(_ sender: NSMenuItem) {
+        guard let mode = items.first(where: { $0.0 === sender })?.1 else { return }
+        view.mode = mode
+        for (item, m) in items { item.state = m == mode ? .on : .off }
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -432,13 +454,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.title = "Green"
         let menu = NSMenu()
-        standItem = NSMenuItem(title: "Stand in the middle", action: #selector(chooseStand), keyEquivalent: "")
-        fightItem = NSMenuItem(title: "Walk and fight", action: #selector(chooseFight), keyEquivalent: "")
-        standItem.target = self
-        fightItem.target = self
-        standItem.state = .on
-        menu.addItem(standItem)
-        menu.addItem(fightItem)
+        let choices: [(String, StageView.Mode)] = [
+            ("Walk together", .walk),
+            ("Stand in the middle", .stand),
+            ("Walk and fight", .fight),
+        ]
+        for (title, mode) in choices {
+            let item = NSMenuItem(title: title, action: #selector(choose(_:)), keyEquivalent: "")
+            item.target = self
+            item.state = mode == view.mode ? .on : .off
+            menu.addItem(item)
+            items.append((item, mode))
+        }
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Quit Green", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         statusItem.menu = menu
