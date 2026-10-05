@@ -37,6 +37,17 @@ final class Figure {
 private func lerp(_ a: CGFloat, _ b: CGFloat, _ t: CGFloat) -> CGFloat { a + (b - a) * t }
 private func sign(_ v: CGFloat) -> CGFloat { v < 0 ? -1 : 1 }
 
+/// One piece of flame. They are made at the Chosen One's hand and drift off, shrinking and cooling.
+struct Spark {
+    var x: CGFloat
+    var y: CGFloat
+    var vx: CGFloat
+    var vy: CGFloat
+    var life: Int
+    let maxLife: Int
+    let size: CGFloat
+}
+
 final class StageView: NSView {
     enum Scene { case solo, approach, fight, aftermath, gap }
 
@@ -68,6 +79,7 @@ final class StageView: NSView {
     private var chosenBase: CGFloat = 0
     private var greenKnock: CGFloat = 0
     private var chosenKnock: CGFloat = 0
+    private var sparks: [Spark] = []
     private var hit: CGFloat = 0                       // how big the "pow" is right now
     private var hitPoint = NSPoint.zero
 
@@ -82,6 +94,7 @@ final class StageView: NSView {
         chosen.alpha = 1
         chosen.pose = Pose()
         hit = 0
+        sparks = []
         switch mode {
         case .stand:
             green.x = w / 2 - 55
@@ -138,6 +151,7 @@ final class StageView: NSView {
         case .fight: break
         }
         let w = bounds.width
+        moveSparks()
         switch scene {
         case .solo:
             walkGreen(width: w)
@@ -212,24 +226,41 @@ final class StageView: NSView {
         let g = green.facing
         hit = max(0, hit - 0.08)
 
-        // The Chosen One: punch, punch, kick, and a big kick at the end.
+        // The Chosen One: fire, a punch, fire, a kick, and then one long blast of fire at the end.
         let cycle = t / 30
         let frac = CGFloat(t % 30) / 30
         let swing = sin(.pi * frac)
         chosen.pose.punch = 0
         chosen.pose.kick = 0
-        if t >= 210 {
-            chosen.pose.kick = swing
-        } else if cycle % 3 == 2 {
-            chosen.pose.kick = swing
+        chosen.pose.punchArm = 1
+        var landed = false
+        if t >= 170 {
+            // the big finish: his arm stays out and the fire keeps coming
+            chosen.pose.punch = min(1, CGFloat(t - 170) / 8)
+            shootFire(amount: 4)
+            landed = t >= 180
         } else {
-            chosen.pose.punchArm = cycle % 3 == 0 ? 1 : -1
-            chosen.pose.punch = swing
-        }
-        let landed = swing > 0.75
-        if landed {
-            hit = 1
-            hitPoint = NSPoint(x: (green.x + chosen.x) / 2, y: ground + (chosen.pose.kick > 0 ? 40 : 62))
+            switch cycle % 4 {
+            case 0, 2:
+                chosen.pose.punch = min(1, swing * 2)
+                if frac > 0.15 && frac < 0.8 { shootFire(amount: 3) }
+                landed = frac > 0.45 && frac < 0.85
+            case 1:
+                chosen.pose.punchArm = -1
+                chosen.pose.punch = swing
+                if swing > 0.75 {
+                    landed = true
+                    hit = 1
+                    hitPoint = NSPoint(x: (green.x + chosen.x) / 2, y: ground + 62)
+                }
+            default:
+                chosen.pose.kick = swing
+                if swing > 0.75 {
+                    landed = true
+                    hit = 1
+                    hitPoint = NSPoint(x: (green.x + chosen.x) / 2, y: ground + 40)
+                }
+            }
         }
 
         // Green fights back, but not as well, and only every other round.
@@ -264,6 +295,14 @@ final class StageView: NSView {
         if t < 28 { green.x -= g * 1.2 }
         if t > 70 { green.alpha = max(0, 1 - CGFloat(t - 70) / 80) }
 
+        // Flames lick up around Green while he lies there.
+        if t < 90 {
+            for _ in 0..<2 {
+                addSpark(x: green.x - g * CGFloat.random(in: 0...60), y: ground + CGFloat.random(in: 2...12),
+                         vx: CGFloat.random(in: -0.3...0.3), vy: CGFloat.random(in: 0.8...2))
+            }
+        }
+
         // The Chosen One cheers, then turns and walks home.
         chosen.pose.punch = 0
         chosen.pose.kick = 0
@@ -289,6 +328,35 @@ final class StageView: NSView {
         }
     }
 
+    private func addSpark(x: CGFloat, y: CGFloat, vx: CGFloat, vy: CGFloat) {
+        let life = Int.random(in: 18...34)
+        sparks.append(Spark(x: x, y: y, vx: vx, vy: vy, life: life, maxLife: life, size: CGFloat.random(in: 5...10)))
+    }
+
+    /// Fire streams out of the Chosen One's outstretched hand toward Green.
+    private func shootFire(amount: Int) {
+        let hand = NSPoint(x: chosen.x + chosen.facing * 38, y: ground + 55)
+        for _ in 0..<amount {
+            addSpark(x: hand.x, y: hand.y + CGFloat.random(in: -3...3),
+                     vx: chosen.facing * CGFloat.random(in: 3.5...5.5), vy: CGFloat.random(in: -0.4...0.7))
+        }
+    }
+
+    private func moveSparks() {
+        for i in sparks.indices {
+            sparks[i].x += sparks[i].vx
+            sparks[i].y += sparks[i].vy
+            sparks[i].vy += 0.04          // flames drift upward
+            sparks[i].life -= 1
+            // When the fire reaches Green it splashes on him and climbs up.
+            if scene == .fight, (green.x - sparks[i].x) * chosen.facing < 4, sparks[i].vx * chosen.facing > 1 {
+                sparks[i].vx *= 0.15
+                sparks[i].vy = CGFloat.random(in: 0.8...2)
+            }
+        }
+        sparks.removeAll { $0.life <= 0 }
+    }
+
     private func bringBackGreen(width w: CGFloat) {
         let side: CGFloat = Bool.random() ? 1 : -1
         green.x = side > 0 ? margin : w - margin
@@ -308,6 +376,7 @@ final class StageView: NSView {
         if green.alpha > 0 { draw(green) }
         if mode != .fight || scene == .approach || scene == .fight || scene == .aftermath { draw(chosen) }
         if hit > 0 { drawBurst(at: hitPoint, size: hit) }
+        drawSparks()
     }
 
     private func draw(_ f: Figure) {
@@ -402,6 +471,23 @@ final class StageView: NSView {
             let label = NSAttributedString(string: f.name, attributes: attributes)
             let size = label.size()
             label.draw(at: NSPoint(x: f.x - size.width / 2, y: headCenter.y + headRadius + 5))
+        }
+    }
+
+    private func drawSparks() {
+        for sp in sparks {
+            let age = 1 - CGFloat(sp.life) / CGFloat(sp.maxLife)   // 0 = new, 1 = about to go out
+            let color: NSColor
+            if age < 0.3 {
+                color = NSColor(calibratedRed: 1, green: 0.9, blue: 0.25, alpha: 0.95)
+            } else if age < 0.65 {
+                color = NSColor(calibratedRed: 1, green: 0.5, blue: 0.05, alpha: 0.85)
+            } else {
+                color = NSColor(calibratedRed: 0.85, green: 0.15, blue: 0.05, alpha: 0.6 * (1 - age) / 0.35 + 0.1)
+            }
+            color.setFill()
+            let r = sp.size * (1 - 0.55 * age) / 2
+            NSBezierPath(ovalIn: NSRect(x: sp.x - r, y: sp.y - r, width: r * 2, height: r * 2)).fill()
         }
     }
 
