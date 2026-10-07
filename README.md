@@ -8,7 +8,7 @@ and your mouse goes straight through him.
 By default, Green and the Chosen One (the black stick figure) fight in the middle of
 your screen. The Chosen One fights with fire, and he wins. Then it starts over.
 
-When Green starts, he says "Hi Elduin!" in a little speech bubble for a few seconds.
+When Green starts, he waves and says "Hi Elduin!" in a little speech bubble for a few seconds.
 
 Click **Green** in the menu bar to pick how they act:
 

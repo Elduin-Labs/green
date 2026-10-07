@@ -17,6 +17,7 @@ struct Pose {
     var hop: CGFloat = 0       // little jumps
     var climb: CGFloat = 0     // 1 = hands and feet on a wall, climbing
     var lift: CGFloat = 0      // how high off the ground he is standing
+    var wave: CGFloat = 0      // 1 = one arm up, waving hello
 }
 
 final class Figure {
@@ -1621,7 +1622,9 @@ final class StageView: NSView {
 
     private func draw(_ f: Figure) {
         if f.isCrewmate { drawCrewmate(f); return }
-        let p = f.pose
+        var p = f.pose
+        // While Green is saying hi, he waves, unless he is busy fighting, cheering or lying down.
+        if f === green, greetT > 0, p.punch == 0, p.kick == 0, p.fall == 0, p.climb == 0, !p.cheer { p.wave = 1 }
         let c = cos(p.fall), s = sin(p.fall)
 
         // Places a point given as (forward, up) from the figure's feet. A fall turns it over backwards.
@@ -1678,6 +1681,10 @@ final class StageView: NSView {
             if side == p.punchArm && p.punch > 0 {
                 handX = 8 + 30 * p.punch
                 handY = shoulderY - 16 + 12 * p.punch
+            }
+            if p.wave > 0 && side == 1 {
+                handX = 16 + sin(CGFloat(greetT) * 0.35) * 9   // the hand swings side to side, up by his head
+                handY = shoulderY + 24
             }
             if p.cheer {
                 handX = side * 24
