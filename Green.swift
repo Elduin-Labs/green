@@ -15,6 +15,8 @@ struct Pose {
     var fall: CGFloat = 0      // 0 = upright, pi/2 = lying flat on his back
     var cheer = false          // both arms up
     var hop: CGFloat = 0       // little jumps
+    var climb: CGFloat = 0     // 1 = hands and feet on a wall, climbing
+    var lift: CGFloat = 0      // how high off the ground he is standing
 }
 
 final class Figure {
@@ -119,7 +121,7 @@ final class StageView: NSView {
     var crashWanted = false
     private var upTicks = 0               // how long the real game has been in front
     // Eating Minecraft
-    private enum EatPhase { case walkIn, munch, burp, gone }
+    private enum EatPhase { case walkIn, climb, topWalk, munch, burp, gone }
     private struct Crumb {
         var x: CGFloat
         var y: CGFloat
@@ -132,8 +134,10 @@ final class StageView: NSView {
     private var bites = 0                 // 6 bites and the whole icon is gone
     private var crumbs: [Crumb] = []
     private let biteCount = 10
-    private var iconSize: CGFloat { mode == .eat ? 110 : 44 }   // the chocolate one is big
-    private var iconCenter: NSPoint { NSPoint(x: bounds.midX, y: ground + iconSize / 2 + 4) }
+    private let chocolateWidth: CGFloat = 220
+    private var chocolateFull: CGFloat { max(120, min(300, bounds.height - ground - 110)) }   // as tall as the screen allows
+    private var chocolateHeight: CGFloat { chocolateFull * (1 - CGFloat(bites) / CGFloat(biteCount)) }
+    private var iconCenter: NSPoint { NSPoint(x: bounds.midX, y: ground + 26) }
 
     override var isFlipped: Bool { false }
 
@@ -704,13 +708,14 @@ final class StageView: NSView {
             .strokeWidth: -4,
         ])
         let size = text.size()
-        text.draw(at: NSPoint(x: bounds.midX - size.width / 2, y: ground + 130))
+        text.draw(at: NSPoint(x: bounds.midX - size.width / 2, y: mode == .eat ? ground + chocolateFull + 24 : ground + 130))
     }
 
     // MARK: eating Minecraft
 
     private func eatStep() {
         let cx = bounds.midX
+        let side = chocolateWidth / 2 + 14     // where they stand to climb: just outside the chocolate
         pt += 1
         iconPulse = max(0, iconPulse - 0.08)
         for i in crumbs.indices {
@@ -724,12 +729,37 @@ final class StageView: NSView {
             f.pose.punch = 0
             f.pose.hop = 0
             f.pose.cheer = false
+            f.pose.climb = 0
+        }
+        // As the chocolate gets lower, they sink down with it.
+        func settle() {
+            for f in [green, chosen] { f.pose.lift += (chocolateHeight - f.pose.lift) * 0.12 }
         }
 
         switch eatPhase {
         case .walkIn:
-            let a = approach(green, to: cx - iconSize / 2 - 30)
-            let b = approach(chosen, to: cx + iconSize / 2 + 30)
+            let a = approach(green, to: cx - side)
+            let b = approach(chosen, to: cx + side)
+            if a { green.facing = 1 }
+            if b { chosen.facing = -1 }
+            if a && b {
+                pt = 0
+                eatPhase = .climb
+            }
+
+        case .climb:
+            // Hands and feet on the chocolate, all the way up.
+            for f in [green, chosen] {
+                f.pose.walk = 0
+                f.pose.climb = 1
+                f.pose.phase += 0.12
+                f.pose.lift = min(chocolateHeight, f.pose.lift + 1.1)
+            }
+            if green.pose.lift >= chocolateHeight { eatPhase = .topWalk }
+
+        case .topWalk:
+            let a = approach(green, to: cx - chocolateWidth / 4)
+            let b = approach(chosen, to: cx + chocolateWidth / 4)
             if a { green.facing = 1 }
             if b { chosen.facing = -1 }
             if a && b {
@@ -739,6 +769,7 @@ final class StageView: NSView {
 
         case .munch:
             // They take turns: grab, bite, chew. Ten bites and the chocolate Minecraft is gone.
+            settle()
             green.pose.walk = 0
             chosen.pose.walk = 0
             let slot = pt / 40, beat = pt % 40
@@ -750,14 +781,14 @@ final class StageView: NSView {
             let eater = slot % 2 == 0 ? green : chosen
             eater.pose.punch = sin(.pi * CGFloat(beat) / 40)
             if beat == 20 {
+                let top = ground + 4 + chocolateHeight
                 bites += 1
                 status = ["Nom!", "Chomp!", "Yum!"].randomElement() ?? "Nom!"
                 NSSound(named: NSSound.Name("Pop"))?.play()
-                let c = iconCenter
                 for _ in 0..<16 {
                     let color = Bool.random() ? NSColor(calibratedRed: 0.33, green: 0.17, blue: 0.08, alpha: 1)
                                               : NSColor(calibratedRed: 0.45, green: 0.25, blue: 0.12, alpha: 1)
-                    crumbs.append(Crumb(x: c.x + CGFloat.random(in: -iconSize / 2...iconSize / 2), y: c.y + CGFloat.random(in: -iconSize / 3...iconSize / 3),
+                    crumbs.append(Crumb(x: eater.x + eater.facing * CGFloat.random(in: 0...50), y: top + CGFloat.random(in: 0...10),
                                         vx: CGFloat.random(in: -1.5...1.5), vy: CGFloat.random(in: 1...3.5),
                                         life: Int.random(in: 25...45), color: color))
                 }
@@ -767,6 +798,7 @@ final class StageView: NSView {
 
         case .burp:
             // Full tummies.
+            settle()
             if pt == 1 {
                 status = "So yummy!"
                 NSSound(named: NSSound.Name("Bottle"))?.play()
@@ -780,12 +812,18 @@ final class StageView: NSView {
             }
 
         case .gone:
-            // A little later a brand new Minecraft shows up, and they eat that one too.
-            if pt >= 90 {
+            // They walk out from where the chocolate was. Then a brand new one appears, and up they go again.
+            settle()
+            let a = approach(green, to: cx - side)
+            let b = approach(chosen, to: cx + side)
+            if a { green.facing = 1 }
+            if b { chosen.facing = -1 }
+            if a && b && pt >= 90 {
+                for f in [green, chosen] { f.pose.lift = 0 }
                 bites = 0
                 iconPulse = 1
                 pt = 0
-                eatPhase = .munch
+                eatPhase = .climb
             }
         }
     }
@@ -797,51 +835,77 @@ final class StageView: NSView {
         }
     }
 
-    /// The Minecraft icon: a little grass block with its name on top. Bites take pieces out of it.
-    private func drawIcon(bites: Int = 0, chocolate: Bool = false) {
-        let c = iconCenter
-        let size = iconSize * (1 + 0.18 * iconPulse)
-        let rect = NSRect(x: c.x - size / 2, y: c.y - size / 2, width: size, height: size)
-        let path = NSBezierPath(roundedRect: rect, xRadius: 6, yRadius: 6)
-        NSColor(calibratedRed: 0.55, green: 0.38, blue: 0.22, alpha: 1).setFill()
-        if chocolate { NSColor(calibratedRed: 0.33, green: 0.17, blue: 0.08, alpha: 1).setFill() }
-        path.fill()
+    /// A giant bar of chocolate with Minecraft on the wrapper. It gets lower with every bite.
+    private func drawChocolate() {
+        let h = chocolateHeight
+        guard h > 1 else { return }
+        let w = chocolateWidth
+        let rect = NSRect(x: bounds.midX - w / 2, y: ground + 4, width: w, height: h)
+        let body = NSBezierPath(roundedRect: rect, xRadius: 10, yRadius: 10)
+        NSColor(calibratedRed: 0.33, green: 0.17, blue: 0.08, alpha: 1).setFill()
+        body.fill()
+
+        // Squares of chocolate, each with a shiny corner.
         NSGraphicsContext.saveGraphicsState()
-        path.addClip()
-        if chocolate {
-            // A chocolate bar: nine squares, each with a lighter edge and a shiny corner.
-            let cell = size / 3
-            for row in 0..<3 {
-                for col in 0..<3 {
-                    let square = NSRect(x: rect.minX + CGFloat(col) * cell, y: rect.minY + CGFloat(row) * cell,
-                                        width: cell, height: cell).insetBy(dx: 3, dy: 3)
-                    NSColor(calibratedRed: 0.43, green: 0.23, blue: 0.11, alpha: 1).setFill()
-                    NSBezierPath(roundedRect: square, xRadius: 3, yRadius: 3).fill()
-                    NSColor(calibratedWhite: 1, alpha: 0.25).setFill()
-                    NSBezierPath(ovalIn: NSRect(x: square.minX + 3, y: square.maxY - 8, width: 6, height: 4)).fill()
-                }
+        body.addClip()
+        let cell = w / 4
+        var y = rect.minY
+        while y < rect.maxY {
+            for col in 0..<4 {
+                let square = NSRect(x: rect.minX + CGFloat(col) * cell, y: y, width: cell, height: cell).insetBy(dx: 3, dy: 3)
+                NSColor(calibratedRed: 0.43, green: 0.23, blue: 0.11, alpha: 1).setFill()
+                NSBezierPath(roundedRect: square, xRadius: 4, yRadius: 4).fill()
+                NSColor(calibratedWhite: 1, alpha: 0.22).setFill()
+                NSBezierPath(ovalIn: NSRect(x: square.minX + 5, y: square.maxY - 13, width: 10, height: 6)).fill()
             }
-        } else {
-            NSColor(calibratedRed: 0.30, green: 0.65, blue: 0.20, alpha: 1).setFill()
-            NSRect(x: rect.minX, y: rect.maxY - size * 0.32, width: size, height: size * 0.32).fill()
+            y += cell
         }
         NSGraphicsContext.restoreGraphicsState()
-        NSColor(calibratedWhite: 0.1, alpha: 0.6).setStroke()
-        path.lineWidth = 2
-        path.stroke()
+        NSColor(calibratedWhite: 0.1, alpha: 0.7).setStroke()
+        body.lineWidth = 3
+        body.stroke()
+
+        // Chewed edge: bites out of the top.
         if bites > 0 {
-            let spots: [NSPoint] = [NSPoint(x: -22, y: 22), NSPoint(x: 22, y: 22), NSPoint(x: -22, y: -22),
-                                    NSPoint(x: 22, y: -22), NSPoint(x: 0, y: 24), NSPoint(x: -24, y: 0),
-                                    NSPoint(x: 24, y: 0), NSPoint(x: 0, y: -24), NSPoint(x: -8, y: 6), NSPoint(x: 8, y: -6)]
+            let offsets: [CGFloat] = [-70, -25, 30, 75, -45, 55]
             NSGraphicsContext.saveGraphicsState()
             NSGraphicsContext.current?.compositingOperation = .clear
-            for spot in spots.prefix(bites) {
-                let r: CGFloat = 13 * size / 44
-                NSBezierPath(ovalIn: NSRect(x: c.x + spot.x * size / 44 - r, y: c.y + spot.y * size / 44 - r,
+            for k in 0..<3 {
+                let r = w / 9
+                NSBezierPath(ovalIn: NSRect(x: rect.midX + offsets[(bites + k * 2) % 6] - r, y: rect.maxY - r * 0.6,
                                             width: r * 2, height: r * 2)).fill()
             }
             NSGraphicsContext.restoreGraphicsState()
         }
+
+        if h > chocolateFull * 0.3 {
+            let label = NSAttributedString(string: "Minecraft", attributes: [
+                .font: NSFont.boldSystemFont(ofSize: 24),
+                .foregroundColor: NSColor(calibratedWhite: 1, alpha: 1),
+                .strokeColor: NSColor(calibratedWhite: 0.1, alpha: 1),
+                .strokeWidth: -4,
+            ])
+            let size = label.size()
+            label.draw(at: NSPoint(x: rect.midX - size.width / 2, y: rect.minY + chocolateFull * 0.12))
+        }
+    }
+
+    /// The Minecraft icon: a little grass block with its name on top.
+    private func drawIcon() {
+        let c = iconCenter
+        let size: CGFloat = 44 * (1 + 0.18 * iconPulse)
+        let rect = NSRect(x: c.x - size / 2, y: c.y - size / 2, width: size, height: size)
+        let path = NSBezierPath(roundedRect: rect, xRadius: 6, yRadius: 6)
+        NSColor(calibratedRed: 0.55, green: 0.38, blue: 0.22, alpha: 1).setFill()
+        path.fill()
+        NSGraphicsContext.saveGraphicsState()
+        path.addClip()
+        NSColor(calibratedRed: 0.30, green: 0.65, blue: 0.20, alpha: 1).setFill()
+        NSRect(x: rect.minX, y: rect.maxY - size * 0.32, width: size, height: size * 0.32).fill()
+        NSGraphicsContext.restoreGraphicsState()
+        NSColor(calibratedWhite: 0.1, alpha: 0.6).setStroke()
+        path.lineWidth = 2
+        path.stroke()
         let label = NSAttributedString(string: "Minecraft", attributes: [
             .font: NSFont.boldSystemFont(ofSize: 11),
             .foregroundColor: NSColor(calibratedWhite: 0.1, alpha: 1),
@@ -858,7 +922,7 @@ final class StageView: NSView {
         dirtyRect.fill(using: .clear)
 
         if mode == .play, playPhase != .playing { drawIcon() }
-        if mode == .eat, bites < biteCount { drawIcon(bites: bites, chocolate: true) }
+        if mode == .eat { drawChocolate() }
         if mode == .eat { drawCrumbs() }
         if green.alpha > 0 { draw(green) }
         if mode != .fight || scene == .approach || scene == .fight || scene == .aftermath { draw(chosen) }
@@ -875,7 +939,7 @@ final class StageView: NSView {
         // Places a point given as (forward, up) from the figure's feet. A fall turns it over backwards.
         func at(_ forward: CGFloat, _ up: CGFloat) -> NSPoint {
             let u = up + p.hop
-            return NSPoint(x: f.x + f.facing * (forward * c - u * s), y: ground + sin(p.fall) * 9 + forward * s + u * c)
+            return NSPoint(x: f.x + f.facing * (forward * c - u * s), y: ground + p.lift + sin(p.fall) * 9 + forward * s + u * c)
         }
 
         let hipY: CGFloat = 34 - p.stance * 3
@@ -904,6 +968,10 @@ final class StageView: NSView {
                 footX = 8 + 30 * p.kick
                 footY = 4 + 28 * p.kick
             }
+            if p.climb > 0 {
+                footX = 7
+                footY = max(0, 6 + sin(side == 1 ? p.phase : p.phase + .pi) * 8)
+            }
             body.move(to: at(0, hipY))
             body.line(to: at(footX, footY))
         }
@@ -915,6 +983,10 @@ final class StageView: NSView {
             handX += side * 11 * idle
             handX = lerp(handX, 10, p.stance)
             handY = lerp(handY, shoulderY - 14, p.stance)
+            if p.climb > 0 {
+                handX = 8
+                handY = shoulderY + 14 + sin(side == 1 ? p.phase : p.phase + .pi) * 12
+            }
             if side == p.punchArm && p.punch > 0 {
                 handX = 8 + 30 * p.punch
                 handY = shoulderY - 16 + 12 * p.punch
