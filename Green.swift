@@ -1236,12 +1236,30 @@ final class StageView: NSView {
             let lift = max(0, (i == 0 ? swing : -swing)) * 6
             fillAndEdge(NSBezierPath(roundedRect: NSRect(x: left, y: lift, width: 18, height: 24), xRadius: 7, yRadius: 7), red)
         }
-        fillAndEdge(NSBezierPath(roundedRect: NSRect(x: -22, y: 14, width: 44, height: 50), xRadius: 22, yRadius: 22), red)
-        // visor
-        let visor = NSBezierPath(roundedRect: NSRect(x: 0, y: 38, width: 26, height: 17), xRadius: 8, yRadius: 8)
-        fillAndEdge(visor, NSColor(calibratedRed: 0.62, green: 0.85, blue: 0.95, alpha: f.alpha))
-        NSColor(calibratedWhite: 1, alpha: 0.8 * f.alpha).setFill()
-        NSBezierPath(roundedRect: NSRect(x: 9, y: 46, width: 11, height: 4), xRadius: 2, yRadius: 2).fill()
+        let bean = NSBezierPath(roundedRect: NSRect(x: -22, y: 14, width: 44, height: 50), xRadius: 22, yRadius: 22)
+        fillAndEdge(bean, red)
+        // a darker shadow down the back and along the bottom, like the real one
+        NSGraphicsContext.saveGraphicsState()
+        bean.addClip()
+        dark.setFill()
+        NSBezierPath(ovalIn: NSRect(x: -44, y: -2, width: 52, height: 50)).fill()
+        NSGraphicsContext.restoreGraphicsState()
+        edge.setStroke()
+        bean.lineWidth = 3
+        bean.stroke()
+        // visor: big and shiny, with a light shine at the top and a darker blue below
+        let visor = NSBezierPath(roundedRect: NSRect(x: -2, y: 36, width: 30, height: 21), xRadius: 10, yRadius: 10)
+        fillAndEdge(visor, NSColor(calibratedRed: 0.55, green: 0.80, blue: 0.93, alpha: f.alpha))
+        NSGraphicsContext.saveGraphicsState()
+        visor.addClip()
+        NSColor(calibratedRed: 0.30, green: 0.55, blue: 0.75, alpha: f.alpha).setFill()
+        NSBezierPath(ovalIn: NSRect(x: -10, y: 26, width: 50, height: 16)).fill()
+        NSGraphicsContext.restoreGraphicsState()
+        edge.setStroke()
+        visor.lineWidth = 3
+        visor.stroke()
+        NSColor(calibratedWhite: 1, alpha: 0.85 * f.alpha).setFill()
+        NSBezierPath(roundedRect: NSRect(x: 8, y: 48, width: 14, height: 5), xRadius: 2.5, yRadius: 2.5).fill()
 
         // the name, while standing up (drawn upright, so undo the flip)
         if p.fall == 0 {
