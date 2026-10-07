@@ -549,8 +549,12 @@ final class StageView: NSView {
         pt += 1
         mouseClick = max(0, mouseClick - 0.1)
         if pt % 30 == 1 {
-            trusted = AXIsProcessTrusted()
-            minecraftIsUp = minecraftIsInFront()
+            let t = AXIsProcessTrusted(), up = minecraftIsInFront()
+            if t != trusted || up != minecraftIsUp || pt == 1 {
+                FileHandle.standardError.write(Data("trusted=\(t) minecraftInFront=\(up) front=\(NSWorkspace.shared.frontmostApplication?.localizedName ?? "none")\n".utf8))
+            }
+            trusted = t
+            minecraftIsUp = up
         }
         for f in [green, chosen] {
             f.pose.walk = 0
