@@ -1234,8 +1234,7 @@ final class StageView: NSView {
         let swing = sin(p.phase) * p.walk
         // Hands! One arm in front, one behind. They swing when he walks, reach up when he climbs or cheers, and punch.
         func hand(_ side: CGFloat) -> NSPoint {
-            var x = 2 - swing * side * 9, y: CGFloat = 30
-            x += side * 3 * (1 - p.walk)
+            var x = side * 28 + swing * side * 9, y: CGFloat = 28    // out at his sides, where you can see them
             if p.climb > 0 { x = 16; y = 64 + sin(side == 1 ? p.phase : p.phase + .pi) * 6 }
             if p.cheer { x = 12 + side * 8; y = 74 + sin(p.phase * 2 + side) * 3 }
             if side == 1 && p.punch > 0 { x = 18 + 30 * p.punch; y = 40 }
@@ -1245,7 +1244,7 @@ final class StageView: NSView {
             let h = hand(side)
             let limb = NSBezierPath()
             limb.lineCapStyle = .round
-            limb.move(to: NSPoint(x: side == 1 ? 8 : -4, y: 40))
+            limb.move(to: NSPoint(x: side * 14, y: 32))
             limb.line(to: h)
             edge.setStroke()
             limb.lineWidth = 13
@@ -1254,8 +1253,8 @@ final class StageView: NSView {
             limb.lineWidth = 7
             limb.stroke()
         }
-        arm(-1, dark)   // the far arm, behind him
         fillAndEdge(NSBezierPath(roundedRect: NSRect(x: -31, y: 22, width: 14, height: 26), xRadius: 6, yRadius: 6), dark)   // backpack
+        arm(-1, dark)   // the far arm, behind him
         // legs
         for (i, left) in [-22.0, 4.0].enumerated() {
             let lift = max(0, (i == 0 ? swing : -swing)) * 6
