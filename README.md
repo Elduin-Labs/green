@@ -13,6 +13,7 @@ Click **Green** in the menu bar to pick how they act:
 - **Fight**: they fight right away. The Chosen One shoots fire at Green, and throws a punch and a kick too. He wins, cheers, and walks home. A few seconds later he comes back and they fight again.
 - **Open Minecraft**: they walk up to a little Minecraft icon and Green clicks it twice. The real Minecraft launcher opens, and they cheer. Then they really play: once you press Play and open a world, Green works the keyboard (walk, jump) and the Chosen One holds a mouse (look around). They only press keys while the real game is the window in front.
 - **Eat Minecraft**: a giant bar of chocolate with Minecraft on it. They climb up the side and stand on top. Then a red Among Us crewmate pops in, climbs up, punches the Chosen One (BOW!) and then Green (POW!), and walks off the side of the screen. After that they take turns biting it. 64 bites and it is gone, so they sink down to the ground. They burp, and the second burp is so big it blows them up into the air. They come down with a loud thump and lie flat for a moment, and everything on screen shakes. Then a new one shows up.
+- **Crewmate on top**: a red Among Us crewmate walks back and forth along the very top of your screen, over everything.
 - **Walk together**: both walk across the middle of your screen.
 - **Stand in the middle**: both stand still.
 

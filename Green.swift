@@ -114,6 +114,7 @@ final class StageView: NSView {
         case fight   // they fight right away, and the Chosen One wins. Then it starts over.
         case play    // they walk to a Minecraft icon and open the real Minecraft
         case eat     // they walk to a Minecraft icon and eat it
+        case crewTop // the red crewmate walks back and forth along the top of the screen
     }
 
     var mode = Mode.fight {
@@ -245,6 +246,11 @@ final class StageView: NSView {
             act = .rest
             actLeft = 0
             status = ""
+        case .crewTop:
+            crew.x = margin
+            crew.facing = 1
+            crew.alpha = 1
+            crew.pose = Pose()
         case .eat:
             green.x = margin
             green.facing = 1
@@ -305,6 +311,16 @@ final class StageView: NSView {
             return
         case .eat:
             eatStep()
+            needsDisplay = true
+            return
+        case .crewTop:
+            // He walks along the very top of the screen, and turns around at the edges.
+            crew.x += crew.facing * 2.4
+            crew.pose.phase += 0.17
+            crew.pose.walk = 1
+            crew.pose.hop = abs(sin(crew.pose.phase)) * 2
+            if crew.x > bounds.width - margin { crew.facing = -1 }
+            if crew.x < margin { crew.facing = 1 }
             needsDisplay = true
             return
         case .fight: break
@@ -1180,9 +1196,9 @@ final class StageView: NSView {
         if mode == .play, playPhase != .playing { drawIcon() }
         if mode == .eat { drawChocolate() }
         if mode == .eat { drawCrumbs() }
-        if green.alpha > 0 { draw(green) }
-        if mode != .fight || scene == .approach || scene == .fight || scene == .aftermath { draw(chosen) }
-        if mode == .eat, crew.alpha > 0 { draw(crew) }
+        if green.alpha > 0, mode != .crewTop { draw(green) }
+        if mode != .crewTop, mode != .fight || scene == .approach || scene == .fight || scene == .aftermath { draw(chosen) }
+        if mode == .eat || mode == .crewTop, crew.alpha > 0 { draw(crew) }
         if mode == .play, playPhase == .cheer || playPhase == .playing { drawMouse() }
         if mode == .play || mode == .eat, !status.isEmpty { drawStatus() }
         if hit > 0 { drawBurst(at: hitPoint, size: hit) }
@@ -1192,6 +1208,7 @@ final class StageView: NSView {
     /// The red Among Us crewmate: a bean with a little backpack and a shiny blue visor.
     private func drawCrewmate(_ f: Figure) {
         let p = f.pose
+        let ground = mode == .crewTop ? bounds.height - 90 : self.ground   // up at the top of the screen, or on the ground
         NSGraphicsContext.saveGraphicsState()
         defer { NSGraphicsContext.restoreGraphicsState() }
         let move = NSAffineTransform()
@@ -1419,6 +1436,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         view = StageView(frame: NSRect(origin: .zero, size: frame.size))
         // `open Green.app --args play` starts them off opening Minecraft.
         if CommandLine.arguments.contains("dig") { view.clicksAllowed = true }   // `--args play dig` also lets them break blocks
+        if CommandLine.arguments.contains("crew") { view.mode = .crewTop }     // `--args crew`
         if CommandLine.arguments.contains("eat") { view.mode = .eat }          // `--args eat`
         if CommandLine.arguments.contains("crash") { view.crashWanted = true }   // `--args play crash`
         if CommandLine.arguments.contains("play") { view.mode = .play }
@@ -1437,6 +1455,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             ("Fight", .fight),
             ("Open Minecraft", .play),
             ("Eat Minecraft", .eat),
+            ("Crewmate on top", .crewTop),
             ("Walk together", .walk),
             ("Stand in the middle", .stand),
         ]
