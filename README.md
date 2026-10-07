@@ -11,7 +11,7 @@ your screen. The Chosen One fights with fire, and he wins. Then it starts over.
 Click **Green** in the menu bar to pick how they act:
 
 - **Fight**: they fight right away. The Chosen One shoots fire at Green, and throws a punch and a kick too. He wins, cheers, and walks home. A few seconds later he comes back and they fight again.
-- **Play Minecraft**: they walk up to a little Minecraft icon and Green clicks it. The real Minecraft launcher opens, and a small game window pops open next to them. Green digs blocks and the Chosen One builds with planks, taking turns.
+- **Open Minecraft**: they walk up to a little Minecraft icon and Green clicks it twice. The real Minecraft launcher opens, and they cheer.
 - **Walk together**: both walk across the middle of your screen.
 - **Stand in the middle**: both stand still.
 
