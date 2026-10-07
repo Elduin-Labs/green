@@ -115,6 +115,7 @@ final class StageView: NSView {
         case play    // they walk to a Minecraft icon and open the real Minecraft
         case eat     // they walk to a Minecraft icon and eat it
         case crewTop // the red crewmate walks back and forth along the top of the screen
+        case hardcore // the red crewmate knocks out Green and the Chosen One for good, then respawns
     }
 
     var mode = Mode.fight {
@@ -194,6 +195,13 @@ final class StageView: NSView {
     private var bites = 0                 // 6 bites and the whole icon is gone
     private var crumbs: [Crumb] = []
     private var shake: CGFloat = 0         // how hard the screen is shaking right now
+    // Hardcore: once they are knocked out, they do not come back.
+    private enum HardcorePhase { case stroll, chaseGreen, hitGreen, chaseChosen, hitChosen, cheer, done }
+    private var hcPhase = HardcorePhase.stroll
+    private var hcT = 0
+    private var deathT = [0, 0]                 // ticks since Green / the Chosen One were knocked out. 0 = still alive.
+    private var graves: [(x: CGFloat, name: String)] = []
+    private var spawnX: CGFloat { margin + 40 } // where the crewmate respawns
     private var crewStep = CrewStep.spawn
     private var crewT = 0                  // ticks into the current crewmate step
     private var knock: [CGFloat] = [0, 0]  // how far Green and the Chosen One are knocked back by a punch
@@ -245,6 +253,24 @@ final class StageView: NSView {
             iconPulse = 0
             act = .rest
             actLeft = 0
+            status = ""
+        case .hardcore:
+            green.x = w / 2 - 80
+            green.facing = 1
+            chosen.x = w / 2 + 80
+            chosen.facing = -1
+            chosen.alpha = 1
+            chosen.pose = Pose()
+            crew.x = spawnX
+            crew.facing = 1
+            crew.alpha = 0
+            crew.pose = Pose()
+            hcPhase = .stroll
+            hcT = 0
+            deathT = [0, 0]
+            graves = []
+            crumbs = []
+            shake = 0
             status = ""
         case .crewTop:
             crew.x = margin
@@ -311,6 +337,10 @@ final class StageView: NSView {
             return
         case .eat:
             eatStep()
+            needsDisplay = true
+            return
+        case .hardcore:
+            hardcoreStep()
             needsDisplay = true
             return
         case .crewTop:
@@ -961,6 +991,161 @@ final class StageView: NSView {
         }
     }
 
+    /// A little puff of dust.
+    private func puff(at x: CGFloat) {
+        for _ in 0..<16 {
+            let shade = CGFloat.random(in: 0.85...1)
+            crumbs.append(Crumb(x: x + CGFloat.random(in: -20...20), y: ground + CGFloat.random(in: 5...50),
+                                vx: CGFloat.random(in: -1.5...1.5), vy: CGFloat.random(in: 0...1.5),
+                                life: Int.random(in: 20...35),
+                                color: NSColor(calibratedWhite: shade, alpha: 1)))
+        }
+    }
+
+    /// Hardcore: the crewmate pops in at his spawn point, knocks out Green and then the Chosen One, and they are gone for good.
+    /// Then he respawns at his spawn point.
+    private func hardcoreStep() {
+        hcT += 1
+        hit = max(0, hit - 0.06)
+        shake = shake < 0.4 ? 0 : shake * 0.94
+        for i in crumbs.indices {
+            crumbs[i].x += crumbs[i].vx
+            crumbs[i].y += crumbs[i].vy
+            crumbs[i].vy -= 0.15
+            crumbs[i].life -= 1
+        }
+        crumbs.removeAll { $0.life <= 0 || $0.y < ground - 4 }
+        crew.pose.punch = 0
+        crew.pose.hop = 0
+        crew.pose.cheer = false
+        crew.pose.walk = 0
+
+        // The ones who got knocked out fall flat, fade away, and leave a gravestone.
+        for (i, f) in [green, chosen].enumerated() where deathT[i] > 0 {
+            deathT[i] += 1
+            f.pose.fall = min(.pi / 2, CGFloat(deathT[i]) * 0.09)
+            if deathT[i] > 70 {
+                f.alpha = max(0, f.alpha - 0.02)
+                if f.alpha == 0, !graves.contains(where: { $0.name == f.name }) { graves.append((f.x, f.name)) }
+            }
+        }
+        // The ones still standing turn to face him.
+        if hcPhase != .stroll {
+            for (i, f) in [green, chosen].enumerated() where deathT[i] == 0 { f.facing = sign(crew.x - f.x) }
+        }
+        func run(to x: CGFloat) -> Bool {
+            let d = x - crew.x
+            if abs(d) < 4 { return true }
+            crew.facing = sign(d)
+            crew.x += crew.facing * 4.4
+            crew.pose.phase += 0.3
+            crew.pose.walk = 1
+            return false
+        }
+        func punchOn(_ victim: Figure, index: Int, word: String) {
+            deathT[index] = 1
+            status = word
+            shake = 10
+            hit = 1
+            hitPoint = NSPoint(x: victim.x, y: ground + 60)
+            NSSound(named: NSSound.Name("Funk"))?.play()
+        }
+
+        switch hcPhase {
+        case .stroll:
+            // They stand around for a bit. Then he spawns.
+            if hcT >= 150 {
+                crew.alpha = 1
+                crew.x = spawnX
+                crew.facing = 1
+                puff(at: crew.x)
+                NSSound(named: NSSound.Name("Pop"))?.play()
+                hcPhase = .chaseGreen
+            }
+
+        case .chaseGreen:
+            if run(to: green.x - 34) { hcT = 0; hcPhase = .hitGreen }
+
+        case .hitGreen:
+            if hcT <= 24 { crew.pose.punch = sin(.pi * CGFloat(hcT) / 24) }
+            if hcT == 12 { punchOn(green, index: 0, word: "BOW!") }
+            if hcT >= 50 { status = ""; hcPhase = .chaseChosen }
+
+        case .chaseChosen:
+            if run(to: chosen.x - 34) { hcT = 0; hcPhase = .hitChosen }
+
+        case .hitChosen:
+            if hcT <= 24 { crew.pose.punch = sin(.pi * CGFloat(hcT) / 24) }
+            if hcT == 12 { punchOn(chosen, index: 1, word: "POW!") }
+            if hcT >= 60 { hcT = 0; status = "GG!"; hcPhase = .cheer }
+
+        case .cheer:
+            crew.pose.cheer = true
+            crew.pose.phase += 0.4
+            crew.pose.hop = abs(sin(CGFloat(hcT) * 0.25)) * 8
+            if hcT >= 140 {
+                // Respawn: a puff where he was, and a puff at his spawn point.
+                puff(at: crew.x)
+                crew.x = spawnX
+                crew.facing = 1
+                puff(at: crew.x)
+                NSSound(named: NSSound.Name("Pop"))?.play()
+                status = "Respawned!"
+                hcT = 0
+                hcPhase = .done
+            }
+
+        case .done:
+            crew.pose.hop = abs(sin(CGFloat(hcT) * 0.08)) * 3
+            if hcT == 150 { status = "" }
+        }
+    }
+
+    private func drawGraves() {
+        for g in graves {
+            let stone = NSBezierPath()
+            stone.move(to: NSPoint(x: g.x - 17, y: ground + 2))
+            stone.line(to: NSPoint(x: g.x - 17, y: ground + 30))
+            stone.appendArc(withCenter: NSPoint(x: g.x, y: ground + 30), radius: 17, startAngle: 180, endAngle: 0, clockwise: true)
+            stone.line(to: NSPoint(x: g.x + 17, y: ground + 2))
+            stone.close()
+            NSColor(calibratedWhite: 0.62, alpha: 1).setFill()
+            stone.fill()
+            NSColor(calibratedWhite: 0.15, alpha: 1).setStroke()
+            stone.lineWidth = 3
+            stone.stroke()
+            let rip = NSAttributedString(string: "RIP", attributes: [
+                .font: NSFont.boldSystemFont(ofSize: 12),
+                .foregroundColor: NSColor(calibratedWhite: 0.2, alpha: 1),
+            ])
+            rip.draw(at: NSPoint(x: g.x - rip.size().width / 2, y: ground + 22))
+            let name = NSAttributedString(string: g.name, attributes: [
+                .font: NSFont.boldSystemFont(ofSize: 11),
+                .foregroundColor: NSColor(calibratedWhite: 0.1, alpha: 1),
+                .strokeColor: NSColor.white,
+                .strokeWidth: -2,
+            ])
+            name.draw(at: NSPoint(x: g.x - name.size().width / 2, y: ground + 52))
+        }
+    }
+
+    /// The crewmate's spawn point: a glowing pad on the ground.
+    private func drawSpawnPoint() {
+        let pad = NSBezierPath(ovalIn: NSRect(x: spawnX - 28, y: ground - 5, width: 56, height: 12))
+        NSColor(calibratedRed: 0.45, green: 0.85, blue: 1, alpha: 0.55).setFill()
+        pad.fill()
+        NSColor(calibratedRed: 0.2, green: 0.55, blue: 0.85, alpha: 0.9).setStroke()
+        pad.lineWidth = 2
+        pad.stroke()
+        let label = NSAttributedString(string: "Spawn", attributes: [
+            .font: NSFont.boldSystemFont(ofSize: 10),
+            .foregroundColor: NSColor(calibratedWhite: 0.1, alpha: 1),
+            .strokeColor: NSColor.white,
+            .strokeWidth: -2,
+        ])
+        label.draw(at: NSPoint(x: spawnX - label.size().width / 2, y: ground - 22))
+    }
+
     /// The red crewmate pops in, climbs the chocolate, punches the Chosen One and then Green, and walks off the screen.
     private func crewVisit(cx: CGFloat, side: CGFloat) {
         crew.pose.walk = 0
@@ -1197,12 +1382,13 @@ final class StageView: NSView {
 
         if mode == .play, playPhase != .playing { drawIcon() }
         if mode == .eat { drawChocolate() }
-        if mode == .eat { drawCrumbs() }
+        if mode == .eat || mode == .hardcore { drawCrumbs() }
+        if mode == .hardcore { drawSpawnPoint(); drawGraves() }
         if green.alpha > 0, mode != .crewTop { draw(green) }
         if mode != .crewTop, mode != .fight || scene == .approach || scene == .fight || scene == .aftermath { draw(chosen) }
-        if mode == .eat || mode == .crewTop, crew.alpha > 0 { draw(crew) }
+        if mode == .eat || mode == .crewTop || mode == .hardcore, crew.alpha > 0 { draw(crew) }
         if mode == .play, playPhase == .cheer || playPhase == .playing { drawMouse() }
-        if mode == .play || mode == .eat, !status.isEmpty { drawStatus() }
+        if mode == .play || mode == .eat || mode == .hardcore, !status.isEmpty { drawStatus() }
         if hit > 0 { drawBurst(at: hitPoint, size: hit) }
         drawSparks()
     }
@@ -1479,6 +1665,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         view = StageView(frame: NSRect(origin: .zero, size: frame.size))
         // `open Green.app --args play` starts them off opening Minecraft.
         if CommandLine.arguments.contains("dig") { view.clicksAllowed = true }   // `--args play dig` also lets them break blocks
+        if CommandLine.arguments.contains("hardcore") { view.mode = .hardcore }  // `--args hardcore`
         if CommandLine.arguments.contains("crew") { view.mode = .crewTop }     // `--args crew`
         if CommandLine.arguments.contains("eat") { view.mode = .eat }          // `--args eat`
         if CommandLine.arguments.contains("crash") { view.crashWanted = true }   // `--args play crash`
@@ -1499,6 +1686,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             ("Open Minecraft", .play),
             ("Eat Minecraft", .eat),
             ("Crewmate on top", .crewTop),
+            ("Hardcore", .hardcore),
             ("Walk together", .walk),
             ("Stand in the middle", .stand),
         ]
