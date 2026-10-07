@@ -163,6 +163,7 @@ final class StageView: NSView {
     private var eatPhase = EatPhase.walkIn
     private var bites = 0                 // 6 bites and the whole icon is gone
     private var crumbs: [Crumb] = []
+    private var flyV: [CGFloat] = [0, 0]   // how fast each of them is flying up from the big burp
     private let biteCount = 64   // a whole stack
     private let chocolateWidth: CGFloat = 220
     private var chocolateFull: CGFloat { max(120, min(300, bounds.height - ground - 110)) }   // as tall as the screen allows
@@ -220,6 +221,7 @@ final class StageView: NSView {
             pt = 0
             iconPulse = 0
             crumbs = []
+            flyV = [0, 0]
             status = ""
         }
         needsDisplay = true
@@ -731,7 +733,7 @@ final class StageView: NSView {
     }
 
     private func drawStatus() {
-        let big = status.contains("BURP")   // burps are written big, and they shake
+        let big = status.contains("BURP") || status.contains("WHEE")   // burps are written big, and they shake
         let text = NSAttributedString(string: status, attributes: [
             .font: NSFont.boldSystemFont(ofSize: big ? 54 : 18),
             .foregroundColor: NSColor(calibratedWhite: 0.1, alpha: 1),
@@ -830,8 +832,8 @@ final class StageView: NSView {
             if beat == 28 { status = "" }
 
         case .burp:
-            // Full tummies.
-            settle()
+            // Full tummies. The second burp is so big it blows them into the air.
+            if pt < 100 { settle() }
             if pt == 1 { status = "So yummy!" }
             if pt == 40 {
                 status = "BURP!"
@@ -840,11 +842,27 @@ final class StageView: NSView {
             if pt == 100 {
                 status = "BURRRRP!!"
                 burp(pitch: 70, seconds: 1.5)
+                flyV = [15, 12]
+            }
+            if pt == 130 { status = "WHEEEE!" }
+            if pt >= 100 {
+                for (i, f) in [green, chosen].enumerated() where f.pose.lift > 0 || flyV[i] > 0 {
+                    f.pose.lift += flyV[i]
+                    flyV[i] -= 0.35                        // and gravity pulls them back
+                    if f.pose.lift <= 0 {
+                        f.pose.lift = 0
+                        flyV[i] = 0
+                    }
+                    f.pose.cheer = true
+                    f.pose.walk = 0
+                    f.pose.phase += 0.4                    // arms flapping
+                    f.x = min(max(f.x + (i == 0 ? -0.8 : 0.8), margin), bounds.width - margin)
+                }
             }
             for f in [green, chosen] {
                 f.pose.hop = abs(sin(CGFloat(pt) * 0.2 + (f === chosen ? 1 : 0))) * 4
                 // They shake with every burp.
-                if (40..<80).contains(pt) || (100..<170).contains(pt) { f.pose.hop += CGFloat.random(in: 0...7) }
+                if (40..<80).contains(pt) { f.pose.hop += CGFloat.random(in: 0...7) }
             }
             if pt >= 190 {
                 pt = 0
