@@ -66,6 +66,7 @@ final class StageView: NSView {
     var mode = Mode.fight {
         didSet {
             launched = false
+            releaseAll()
             reset()
         }
     }
@@ -89,11 +90,28 @@ final class StageView: NSView {
     private var hitPoint = NSPoint.zero
 
     // Opening Minecraft
-    private enum PlayPhase { case walkIn, click, cheer }
+    private enum PlayPhase { case walkIn, click, cheer, playing }
+    private enum Act { case rest, walk, leap, look, dig }
     private var playPhase = PlayPhase.walkIn
     private var pt = 0
     private var launched = false          // the real Minecraft has been opened this time round
     private var iconPulse: CGFloat = 0    // the icon bounces when it gets clicked
+    private var act = Act.rest
+    private var actLeft = 0
+    private var lookDir: Int64 = 1
+    private var held = Set<CGKeyCode>()   // keys they are pressing in the real game right now
+    private var mouseIsDown = false
+    private var status = ""               // what they say while they wait
+    private var trusted = false           // a grown-up said yes to controlling the keyboard and mouse
+    private var minecraftIsUp = false     // the real game is the window in front
+    private var askedForKeys = false
+    private var mouseSlide: CGFloat = 0   // the mouse in the Chosen One's hand slides when he looks around
+    private var mouseClick: CGFloat = 0   // and flashes when he clicks
+    /// Digging means holding down the real mouse button. It stays off until Elduin turns it on from the menu,
+    /// because in a menu screen a click could press the wrong button.
+    var clicksAllowed = false
+    private let keyW: CGKeyCode = 13
+    private let keySpace: CGKeyCode = 49
     private var iconCenter: NSPoint { NSPoint(x: bounds.midX, y: ground + 26) }
 
     override var isFlipped: Bool { false }
@@ -134,6 +152,9 @@ final class StageView: NSView {
             playPhase = .walkIn
             pt = 0
             iconPulse = 0
+            act = .rest
+            actLeft = 0
+            status = ""
         }
         needsDisplay = true
     }
@@ -451,7 +472,167 @@ final class StageView: NSView {
                 f.pose.phase += 0.25
                 f.pose.hop = abs(sin(CGFloat(pt) * 0.16 + (f === chosen ? 1.5 : 0))) * 7
             }
+            if pt >= 240 {
+                pt = 0
+                act = .rest
+                actLeft = 0
+                playPhase = .playing
+            }
+
+        case .playing:
+            playTheGame()
         }
+    }
+
+    // MARK: really playing
+
+    private func pointerPosition() -> CGPoint {
+        let m = NSEvent.mouseLocation
+        let screenHeight = NSScreen.screens.first?.frame.height ?? 0
+        return CGPoint(x: m.x, y: screenHeight - m.y)
+    }
+
+    private func setKey(_ code: CGKeyCode, _ down: Bool) {
+        guard down != held.contains(code) else { return }
+        if down { held.insert(code) } else { held.remove(code) }
+        CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: down)?.post(tap: .cghidEventTap)
+    }
+
+    private func setMouseButton(_ down: Bool) {
+        guard down != mouseIsDown else { return }
+        mouseIsDown = down
+        CGEvent(mouseEventSource: nil, mouseType: down ? .leftMouseDown : .leftMouseUp,
+                mouseCursorPosition: pointerPosition(), mouseButton: .left)?.post(tap: .cghidEventTap)
+    }
+
+    private func look(dx: Int64) {
+        let e = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved,
+                        mouseCursorPosition: pointerPosition(), mouseButton: .left)
+        e?.setIntegerValueField(.mouseEventDeltaX, value: dx)
+        e?.post(tap: .cghidEventTap)
+    }
+
+    /// Lets go of every key and the mouse button. Always called before they stop.
+    func releaseAll() {
+        for key in Array(held) { setKey(key, false) }
+        setMouseButton(false)
+    }
+
+    /// Only the real game ever gets their key presses: it runs from Minecraft's own Java.
+    private func minecraftIsInFront() -> Bool {
+        guard let path = NSWorkspace.shared.frontmostApplication?.executableURL?.path else { return false }
+        return path.contains("/minecraft/runtime/")
+    }
+
+    private func chooseAct() {
+        var options: [Act] = [.walk, .walk, .leap, .look, .look, .rest]
+        if clicksAllowed { options += [.dig, .dig] }
+        act = options.randomElement() ?? .rest
+        switch act {
+        case .rest: actLeft = 60
+        case .walk: actLeft = Int.random(in: 120...240)
+        case .leap: actLeft = Int.random(in: 120...200)
+        case .look: actLeft = Int.random(in: 40...100)
+        case .dig: actLeft = Int.random(in: 90...160)
+        }
+        lookDir = Bool.random() ? 1 : -1
+    }
+
+    /// Green works the keyboard (walk, jump). The Chosen One works the mouse (look around, dig).
+    private func playTheGame() {
+        pt += 1
+        mouseClick = max(0, mouseClick - 0.1)
+        if pt % 30 == 1 {
+            trusted = AXIsProcessTrusted()
+            minecraftIsUp = minecraftIsInFront()
+        }
+        for f in [green, chosen] {
+            f.pose.walk = 0
+            f.pose.cheer = false
+            f.pose.hop = 0
+            f.pose.punch = 0
+        }
+        chosen.pose.punch = 0.3          // his arm is out, holding the mouse
+        chosen.pose.punchArm = 1
+
+        if !trusted {
+            releaseAll()
+            status = "A grown-up has to say yes first!"
+            if !askedForKeys {
+                askedForKeys = true
+                // This shows the Mac's own "allow Green to control your computer?" box.
+                _ = AXIsProcessTrustedWithOptions(["AXTrustedCheckOptionPrompt": true] as CFDictionary)
+            }
+            return
+        }
+        if !minecraftIsUp {
+            releaseAll()
+            act = .rest
+            actLeft = 0
+            status = "Press Play in Minecraft, then open a world!"
+            return
+        }
+        status = ""
+
+        actLeft -= 1
+        if actLeft <= 0 {
+            releaseAll()
+            chooseAct()
+        }
+        switch act {
+        case .rest:
+            break
+        case .walk:
+            setKey(keyW, true)
+            walkTogether()
+        case .leap:
+            setKey(keyW, true)
+            walkTogether()
+            let beat = actLeft % 40
+            setKey(keySpace, beat > 28)
+            green.pose.hop = beat > 28 ? 14 : 0
+        case .look:
+            look(dx: lookDir * 7)
+            mouseSlide = CGFloat(lookDir) * sin(CGFloat(pt) * 0.2) * 9
+            chosen.pose.phase += 0.1
+        case .dig:
+            setMouseButton(clicksAllowed)
+            mouseClick = 1
+            chosen.pose.punch = 0.3 + 0.2 * abs(sin(CGFloat(pt) * 0.25))
+        }
+    }
+
+    /// The little computer mouse the Chosen One holds.
+    private func drawMouse() {
+        let hand = NSPoint(x: chosen.x + chosen.facing * 33 + mouseSlide * chosen.facing, y: ground + 47)
+        let body = NSBezierPath(roundedRect: NSRect(x: hand.x - 8, y: hand.y - 11, width: 16, height: 22), xRadius: 8, yRadius: 8)
+        NSColor(calibratedWhite: 0.95, alpha: 1).setFill()
+        body.fill()
+        if mouseClick > 0 {
+            NSColor(calibratedRed: 1, green: 0.85, blue: 0.1, alpha: mouseClick).setFill()
+            NSBezierPath(roundedRect: NSRect(x: hand.x - 7, y: hand.y + 1, width: 14, height: 9), xRadius: 4, yRadius: 4).fill()
+        }
+        NSColor(calibratedWhite: 0.15, alpha: 1).setStroke()
+        body.lineWidth = 2
+        body.stroke()
+        let line = NSBezierPath()
+        line.lineWidth = 1.5
+        line.move(to: NSPoint(x: hand.x - 8, y: hand.y + 1))
+        line.line(to: NSPoint(x: hand.x + 8, y: hand.y + 1))
+        line.move(to: NSPoint(x: hand.x, y: hand.y + 1))
+        line.line(to: NSPoint(x: hand.x, y: hand.y + 11))
+        line.stroke()
+    }
+
+    private func drawStatus() {
+        let text = NSAttributedString(string: status, attributes: [
+            .font: NSFont.boldSystemFont(ofSize: 18),
+            .foregroundColor: NSColor(calibratedWhite: 0.1, alpha: 1),
+            .strokeColor: NSColor.white,
+            .strokeWidth: -4,
+        ])
+        let size = text.size()
+        text.draw(at: NSPoint(x: bounds.midX - size.width / 2, y: ground + 130))
     }
 
     /// The Minecraft icon: a little grass block with its name on top.
@@ -485,9 +666,11 @@ final class StageView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         dirtyRect.fill(using: .clear)
 
-        if mode == .play { drawIcon() }
+        if mode == .play, playPhase != .playing { drawIcon() }
         if green.alpha > 0 { draw(green) }
         if mode != .fight || scene == .approach || scene == .fight || scene == .aftermath { draw(chosen) }
+        if mode == .play, playPhase == .cheer || playPhase == .playing { drawMouse() }
+        if mode == .play, !status.isEmpty { drawStatus() }
         if hit > 0 { drawBurst(at: hitPoint, size: hit) }
         drawSparks()
     }
@@ -634,6 +817,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         for (item, m) in items { item.state = m == mode ? .on : .off }
     }
 
+    @objc func toggleClicks(_ sender: NSMenuItem) {
+        view.clicksAllowed.toggle()
+        sender.state = view.clicksAllowed ? .on : .off
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        view.releaseAll()   // never leave a key or the mouse button stuck down in the game
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         guard let screen = NSScreen.main else { return }
         let area = screen.visibleFrame
@@ -674,6 +866,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             menu.addItem(item)
             items.append((item, mode))
         }
+        menu.addItem(.separator())
+        let clicks = NSMenuItem(title: "Let them click (only inside a world)", action: #selector(toggleClicks(_:)), keyEquivalent: "")
+        clicks.target = self
+        menu.addItem(clicks)
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Quit Green", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         statusItem.menu = menu
