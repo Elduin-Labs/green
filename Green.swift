@@ -37,6 +37,36 @@ final class Figure {
     }
 }
 
+/// Makes a real, loud, rumbly burp: a low buzz that slides down, with a gurgle in it. No sound file needed.
+private func makeBurp(seconds: Double, pitch: Double) -> Data {
+    let rate = 44100.0
+    let count = Int(rate * seconds)
+    var samples = [Int16]()
+    samples.reserveCapacity(count)
+    var phase = 0.0
+    for i in 0..<count {
+        let t = Double(i) / rate
+        let f = pitch * (1.0 - 0.55 * t / seconds) * (1 + 0.06 * sin(2 * .pi * 9 * t))
+        phase += f / rate
+        let saw = 2 * (phase - floor(phase)) - 1
+        let square = phase - floor(phase) < 0.5 ? 1.0 : -1.0
+        let gurgle = 0.55 + 0.45 * sin(2 * .pi * 26 * t)
+        let envelope = min(1, t / 0.04) * min(1, (seconds - t) / 0.25)
+        let noise = Double.random(in: -1...1) * 0.15
+        let x = (0.6 * saw + 0.4 * square + noise) * gurgle * envelope * 1.6   // pushed hard, so it is loud
+        samples.append(Int16(max(-1, min(1, x)) * 32000))
+    }
+    var data = Data()
+    func put32(_ v: UInt32) { withUnsafeBytes(of: v.littleEndian) { data.append(contentsOf: $0) } }
+    func put16(_ v: UInt16) { withUnsafeBytes(of: v.littleEndian) { data.append(contentsOf: $0) } }
+    data.append(contentsOf: Array("RIFF".utf8)); put32(UInt32(36 + count * 2))
+    data.append(contentsOf: Array("WAVEfmt ".utf8)); put32(16); put16(1); put16(1)
+    put32(44100); put32(88200); put16(2); put16(16)
+    data.append(contentsOf: Array("data".utf8)); put32(UInt32(count * 2))
+    for v in samples { put16(UInt16(bitPattern: v)) }
+    return data
+}
+
 private func lerp(_ a: CGFloat, _ b: CGFloat, _ t: CGFloat) -> CGFloat { a + (b - a) * t }
 private func sign(_ v: CGFloat) -> CGFloat { v < 0 ? -1 : 1 }
 
@@ -701,14 +731,17 @@ final class StageView: NSView {
     }
 
     private func drawStatus() {
+        let big = status.contains("BURP")   // burps are written big, and they shake
         let text = NSAttributedString(string: status, attributes: [
-            .font: NSFont.boldSystemFont(ofSize: 18),
+            .font: NSFont.boldSystemFont(ofSize: big ? 54 : 18),
             .foregroundColor: NSColor(calibratedWhite: 0.1, alpha: 1),
             .strokeColor: NSColor.white,
             .strokeWidth: -4,
         ])
         let size = text.size()
-        text.draw(at: NSPoint(x: bounds.midX - size.width / 2, y: mode == .eat ? ground + chocolateFull + 24 : ground + 130))
+        let shake: CGFloat = big ? 4 : 0
+        text.draw(at: NSPoint(x: bounds.midX - size.width / 2 + CGFloat.random(in: -shake...shake),
+                              y: (mode == .eat ? ground + chocolateFull + 24 : ground + 130) + CGFloat.random(in: -shake...shake)))
     }
 
     // MARK: eating Minecraft
@@ -799,13 +832,21 @@ final class StageView: NSView {
         case .burp:
             // Full tummies.
             settle()
-            if pt == 1 {
-                status = "So yummy!"
-                NSSound(named: NSSound.Name("Bottle"))?.play()
+            if pt == 1 { status = "So yummy!" }
+            if pt == 40 {
+                status = "BURP!"
+                burp(pitch: 95, seconds: 0.9)
             }
-            if pt == 70 { status = "*burp*" }
-            for f in [green, chosen] { f.pose.hop = abs(sin(CGFloat(pt) * 0.2 + (f === chosen ? 1 : 0))) * 4 }
-            if pt >= 130 {
+            if pt == 100 {
+                status = "BURRRRP!!"
+                burp(pitch: 70, seconds: 1.5)
+            }
+            for f in [green, chosen] {
+                f.pose.hop = abs(sin(CGFloat(pt) * 0.2 + (f === chosen ? 1 : 0))) * 4
+                // They shake with every burp.
+                if (40..<80).contains(pt) || (100..<170).contains(pt) { f.pose.hop += CGFloat.random(in: 0...7) }
+            }
+            if pt >= 190 {
                 pt = 0
                 status = ""
                 eatPhase = .gone
@@ -825,6 +866,16 @@ final class StageView: NSView {
                 pt = 0
                 eatPhase = .climb
             }
+        }
+    }
+
+    /// Plays a burp, twice on top of itself so it is extra loud.
+    private func burp(pitch: Double, seconds: Double) {
+        let data = makeBurp(seconds: seconds, pitch: pitch)
+        for _ in 0..<2 {
+            let sound = NSSound(data: data)
+            sound?.volume = 1
+            sound?.play()
         }
     }
 
