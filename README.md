@@ -12,6 +12,7 @@ Click **Green** in the menu bar to pick how they act:
 
 - **Fight**: they fight right away. The Chosen One shoots fire at Green, and throws a punch and a kick too. He wins, cheers, and walks home. A few seconds later he comes back and they fight again.
 - **Open Minecraft**: they walk up to a little Minecraft icon and Green clicks it twice. The real Minecraft launcher opens, and they cheer. Then they really play: once you press Play and open a world, Green works the keyboard (walk, jump) and the Chosen One holds a mouse (look around). They only press keys while the real game is the window in front.
+- **Eat Minecraft**: they walk up to the Minecraft icon and take turns biting it, with crumbs and a chomp sound. Six bites and it is gone. They burp, and a new one shows up.
 - **Walk together**: both walk across the middle of your screen.
 - **Stand in the middle**: both stand still.
 
@@ -26,7 +27,7 @@ A little **Green** shows up in the menu bar at the top. Click it to choose what 
 
 ## Letting them play (for a grown-up)
 
-To press keys and move the mouse in Minecraft, Green needs the Mac's OK: **System Settings, Privacy & Security, Accessibility**, then turn on **Green**. The Mac also asks the first time they try. Rebuilding Green can make the Mac forget the OK, so turn it off and on again if they stop playing.
+To press keys and move the mouse in Minecraft, Green needs the Mac's OK: **System Settings, Privacy & Security, Accessibility**, then turn on **Green**. The Mac also asks the first time they try. `build.sh` signs Green the same way every time, so the Mac keeps the OK when Green is rebuilt. If they ever stop playing, turn Green off and on again in that list.
 
 The menu item **Let them click (only inside a world)** lets the Chosen One dig by holding the mouse button. It is off by default, because in a menu a click could press the wrong button.
 

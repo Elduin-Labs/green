@@ -61,6 +61,7 @@ final class StageView: NSView {
         case walk    // both walk together back and forth across the middle
         case fight   // they fight right away, and the Chosen One wins. Then it starts over.
         case play    // they walk to a Minecraft icon and open the real Minecraft
+        case eat     // they walk to a Minecraft icon and eat it
     }
 
     var mode = Mode.fight {
@@ -117,6 +118,19 @@ final class StageView: NSView {
     /// Holding F3 and C together for ten seconds is Minecraft's own "crash the game on purpose" shortcut.
     var crashWanted = false
     private var upTicks = 0               // how long the real game has been in front
+    // Eating Minecraft
+    private enum EatPhase { case walkIn, munch, burp, gone }
+    private struct Crumb {
+        var x: CGFloat
+        var y: CGFloat
+        var vx: CGFloat
+        var vy: CGFloat
+        var life: Int
+        let color: NSColor
+    }
+    private var eatPhase = EatPhase.walkIn
+    private var bites = 0                 // 6 bites and the whole icon is gone
+    private var crumbs: [Crumb] = []
     private var iconCenter: NSPoint { NSPoint(x: bounds.midX, y: ground + 26) }
 
     override var isFlipped: Bool { false }
@@ -160,6 +174,17 @@ final class StageView: NSView {
             act = .rest
             actLeft = 0
             status = ""
+        case .eat:
+            green.x = margin
+            green.facing = 1
+            chosen.x = w - margin
+            chosen.facing = -1
+            eatPhase = .walkIn
+            bites = 0
+            pt = 0
+            iconPulse = 0
+            crumbs = []
+            status = ""
         }
         needsDisplay = true
     }
@@ -197,6 +222,10 @@ final class StageView: NSView {
             return
         case .play:
             playStep()
+            needsDisplay = true
+            return
+        case .eat:
+            eatStep()
             needsDisplay = true
             return
         case .fight: break
@@ -676,8 +705,98 @@ final class StageView: NSView {
         text.draw(at: NSPoint(x: bounds.midX - size.width / 2, y: ground + 130))
     }
 
-    /// The Minecraft icon: a little grass block with its name on top.
-    private func drawIcon() {
+    // MARK: eating Minecraft
+
+    private func eatStep() {
+        let cx = bounds.midX
+        pt += 1
+        iconPulse = max(0, iconPulse - 0.08)
+        for i in crumbs.indices {
+            crumbs[i].x += crumbs[i].vx
+            crumbs[i].y += crumbs[i].vy
+            crumbs[i].vy -= 0.15   // crumbs fall
+            crumbs[i].life -= 1
+        }
+        crumbs.removeAll { $0.life <= 0 || $0.y < ground - 4 }
+        for f in [green, chosen] {
+            f.pose.punch = 0
+            f.pose.hop = 0
+            f.pose.cheer = false
+        }
+
+        switch eatPhase {
+        case .walkIn:
+            let a = approach(green, to: cx - 45)
+            let b = approach(chosen, to: cx + 45)
+            if a { green.facing = 1 }
+            if b { chosen.facing = -1 }
+            if a && b {
+                pt = 0
+                eatPhase = .munch
+            }
+
+        case .munch:
+            // They take turns: grab, bite, chew. Six bites and the Minecraft icon is gone.
+            green.pose.walk = 0
+            chosen.pose.walk = 0
+            let slot = pt / 40, beat = pt % 40
+            if slot >= 6 {
+                pt = 0
+                eatPhase = .burp
+                return
+            }
+            let eater = slot % 2 == 0 ? green : chosen
+            eater.pose.punch = sin(.pi * CGFloat(beat) / 40)
+            if beat == 20 {
+                bites += 1
+                status = ["Nom!", "Chomp!", "Yum!"].randomElement() ?? "Nom!"
+                NSSound(named: NSSound.Name("Pop"))?.play()
+                let c = iconCenter
+                for _ in 0..<9 {
+                    let color = Bool.random() ? NSColor(calibratedRed: 0.55, green: 0.38, blue: 0.22, alpha: 1)
+                                              : NSColor(calibratedRed: 0.30, green: 0.65, blue: 0.20, alpha: 1)
+                    crumbs.append(Crumb(x: c.x + CGFloat.random(in: -10...10), y: c.y + CGFloat.random(in: -8...8),
+                                        vx: CGFloat.random(in: -1.5...1.5), vy: CGFloat.random(in: 1...3.5),
+                                        life: Int.random(in: 25...45), color: color))
+                }
+            }
+            if beat > 20 { eater.pose.hop = abs(sin(CGFloat(beat) * 0.5)) * 4 }   // chewing
+            if beat == 38 { status = "" }
+
+        case .burp:
+            // Full tummies.
+            if pt == 1 {
+                status = "So yummy!"
+                NSSound(named: NSSound.Name("Bottle"))?.play()
+            }
+            if pt == 70 { status = "*burp*" }
+            for f in [green, chosen] { f.pose.hop = abs(sin(CGFloat(pt) * 0.2 + (f === chosen ? 1 : 0))) * 4 }
+            if pt >= 130 {
+                pt = 0
+                status = ""
+                eatPhase = .gone
+            }
+
+        case .gone:
+            // A little later a brand new Minecraft shows up, and they eat that one too.
+            if pt >= 90 {
+                bites = 0
+                iconPulse = 1
+                pt = 0
+                eatPhase = .munch
+            }
+        }
+    }
+
+    private func drawCrumbs() {
+        for c in crumbs {
+            c.color.setFill()
+            NSRect(x: c.x - 2, y: c.y - 2, width: 4, height: 4).fill()
+        }
+    }
+
+    /// The Minecraft icon: a little grass block with its name on top. Bites take pieces out of it.
+    private func drawIcon(bites: Int = 0) {
         let c = iconCenter
         let size = 44 * (1 + 0.18 * iconPulse)
         let rect = NSRect(x: c.x - size / 2, y: c.y - size / 2, width: size, height: size)
@@ -692,6 +811,18 @@ final class StageView: NSView {
         NSColor(calibratedWhite: 0.1, alpha: 0.6).setStroke()
         path.lineWidth = 2
         path.stroke()
+        if bites > 0 {
+            let spots: [NSPoint] = [NSPoint(x: -22, y: 16), NSPoint(x: 22, y: 14), NSPoint(x: -22, y: -14),
+                                    NSPoint(x: 22, y: -14), NSPoint(x: 0, y: 26), NSPoint(x: 0, y: -24)]
+            NSGraphicsContext.saveGraphicsState()
+            NSGraphicsContext.current?.compositingOperation = .clear
+            for spot in spots.prefix(bites) {
+                let r: CGFloat = 12 * size / 44
+                NSBezierPath(ovalIn: NSRect(x: c.x + spot.x * size / 44 - r, y: c.y + spot.y * size / 44 - r,
+                                            width: r * 2, height: r * 2)).fill()
+            }
+            NSGraphicsContext.restoreGraphicsState()
+        }
         let label = NSAttributedString(string: "Minecraft", attributes: [
             .font: NSFont.boldSystemFont(ofSize: 11),
             .foregroundColor: NSColor(calibratedWhite: 0.1, alpha: 1),
@@ -708,10 +839,12 @@ final class StageView: NSView {
         dirtyRect.fill(using: .clear)
 
         if mode == .play, playPhase != .playing { drawIcon() }
+        if mode == .eat, bites < 6 { drawIcon(bites: bites) }
+        if mode == .eat { drawCrumbs() }
         if green.alpha > 0 { draw(green) }
         if mode != .fight || scene == .approach || scene == .fight || scene == .aftermath { draw(chosen) }
         if mode == .play, playPhase == .cheer || playPhase == .playing { drawMouse() }
-        if mode == .play, !status.isEmpty { drawStatus() }
+        if mode == .play || mode == .eat, !status.isEmpty { drawStatus() }
         if hit > 0 { drawBurst(at: hitPoint, size: hit) }
         drawSparks()
     }
@@ -887,6 +1020,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         view = StageView(frame: NSRect(origin: .zero, size: frame.size))
         // `open Green.app --args play` starts them off opening Minecraft.
         if CommandLine.arguments.contains("dig") { view.clicksAllowed = true }   // `--args play dig` also lets them break blocks
+        if CommandLine.arguments.contains("eat") { view.mode = .eat }          // `--args eat`
         if CommandLine.arguments.contains("crash") { view.crashWanted = true }   // `--args play crash`
         if CommandLine.arguments.contains("play") { view.mode = .play }
         window.contentView = view
@@ -903,6 +1037,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let choices: [(String, StageView.Mode)] = [
             ("Fight", .fight),
             ("Open Minecraft", .play),
+            ("Eat Minecraft", .eat),
             ("Walk together", .walk),
             ("Stand in the middle", .stand),
         ]
