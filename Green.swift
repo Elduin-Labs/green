@@ -56,13 +56,32 @@ private func makeBurp(seconds: Double, pitch: Double) -> Data {
         let x = (0.6 * saw + 0.4 * square + noise) * gurgle * envelope * 1.6   // pushed hard, so it is loud
         samples.append(Int16(max(-1, min(1, x)) * 32000))
     }
+    return wavData(samples)
+}
+
+/// Makes a heavy "THUMP": a very low note that drops and dies away fast.
+private func makeThump() -> Data {
+    let rate = 44100.0
+    let seconds = 0.45
+    var samples = [Int16]()
+    var phase = 0.0
+    for i in 0..<Int(rate * seconds) {
+        let t = Double(i) / rate
+        phase += (30 + 60 * exp(-t * 14)) / rate
+        let x = (sin(2 * .pi * phase) + Double.random(in: -1...1) * 0.25 * exp(-t * 40)) * exp(-t * 7) * 2.2
+        samples.append(Int16(max(-1, min(1, x)) * 32000))
+    }
+    return wavData(samples)
+}
+
+private func wavData(_ samples: [Int16]) -> Data {
     var data = Data()
     func put32(_ v: UInt32) { withUnsafeBytes(of: v.littleEndian) { data.append(contentsOf: $0) } }
     func put16(_ v: UInt16) { withUnsafeBytes(of: v.littleEndian) { data.append(contentsOf: $0) } }
-    data.append(contentsOf: Array("RIFF".utf8)); put32(UInt32(36 + count * 2))
+    data.append(contentsOf: Array("RIFF".utf8)); put32(UInt32(36 + samples.count * 2))
     data.append(contentsOf: Array("WAVEfmt ".utf8)); put32(16); put16(1); put16(1)
     put32(44100); put32(88200); put16(2); put16(16)
-    data.append(contentsOf: Array("data".utf8)); put32(UInt32(count * 2))
+    data.append(contentsOf: Array("data".utf8)); put32(UInt32(samples.count * 2))
     for v in samples { put16(UInt16(bitPattern: v)) }
     return data
 }
@@ -163,6 +182,7 @@ final class StageView: NSView {
     private var eatPhase = EatPhase.walkIn
     private var bites = 0                 // 6 bites and the whole icon is gone
     private var crumbs: [Crumb] = []
+    private var landT = [0, 0]             // how long each of them has been lying flat after landing
     private var flyV: [CGFloat] = [0, 0]   // how fast each of them is flying up from the big burp
     private let biteCount = 64   // a whole stack
     private let chocolateWidth: CGFloat = 220
@@ -222,6 +242,7 @@ final class StageView: NSView {
             iconPulse = 0
             crumbs = []
             flyV = [0, 0]
+            landT = [0, 0]
             status = ""
         }
         needsDisplay = true
@@ -733,7 +754,7 @@ final class StageView: NSView {
     }
 
     private func drawStatus() {
-        let big = status.contains("BURP") || status.contains("WHEE")   // burps are written big, and they shake
+        let big = status.contains("BURP") || status.contains("WHEE") || status.contains("THUMP")   // burps are written big, and they shake
         let text = NSAttributedString(string: status, attributes: [
             .font: NSFont.boldSystemFont(ofSize: big ? 54 : 18),
             .foregroundColor: NSColor(calibratedWhite: 0.1, alpha: 1),
@@ -852,6 +873,7 @@ final class StageView: NSView {
                     if f.pose.lift <= 0 {
                         f.pose.lift = 0
                         flyV[i] = 0
+                        thump(at: f, index: i)
                     }
                     f.pose.cheer = true
                     f.pose.walk = 0
@@ -864,7 +886,14 @@ final class StageView: NSView {
                 // They shake with every burp.
                 if (40..<80).contains(pt) { f.pose.hop += CGFloat.random(in: 0...7) }
             }
-            if pt >= 190 {
+            // After the landing they lie flat for a moment, then get up.
+            for (i, f) in [green, chosen].enumerated() where landT[i] > 0 && f.pose.lift == 0 && flyV[i] == 0 {
+                landT[i] -= 1
+                f.pose.fall = (.pi / 2) * min(1, CGFloat(landT[i]) / 14)
+                f.pose.cheer = false
+                f.pose.hop = 0
+            }
+            if pt >= 270 {
                 pt = 0
                 status = ""
                 eatPhase = .gone
@@ -884,6 +913,22 @@ final class StageView: NSView {
                 pt = 0
                 eatPhase = .climb
             }
+        }
+    }
+
+    /// The landing: a loud thump, a puff of dust, and they lie flat.
+    private func thump(at f: Figure, index: Int) {
+        landT[index] = 50
+        status = "THUMP!"
+        let sound = NSSound(data: makeThump())
+        sound?.volume = 1
+        sound?.play()
+        for _ in 0..<14 {
+            let shade = CGFloat.random(in: 0.5...0.75)
+            crumbs.append(Crumb(x: f.x + CGFloat.random(in: -22...22), y: ground + 2,
+                                vx: CGFloat.random(in: -2.2...2.2), vy: CGFloat.random(in: 0.5...2.2),
+                                life: Int.random(in: 20...34),
+                                color: NSColor(calibratedRed: shade, green: shade * 0.95, blue: shade * 0.85, alpha: 1)))
         }
     }
 
