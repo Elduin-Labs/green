@@ -841,6 +841,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         view = StageView(frame: NSRect(origin: .zero, size: frame.size))
         // `open Green.app --args play` starts them off opening Minecraft.
+        if CommandLine.arguments.contains("dig") { view.clicksAllowed = true }   // `--args play dig` also lets them break blocks
         if CommandLine.arguments.contains("play") { view.mode = .play }
         window.contentView = view
         window.orderFrontRegardless()
@@ -869,6 +870,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(.separator())
         let clicks = NSMenuItem(title: "Let them click (only inside a world)", action: #selector(toggleClicks(_:)), keyEquivalent: "")
         clicks.target = self
+        clicks.state = view.clicksAllowed ? .on : .off
         menu.addItem(clicks)
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Quit Green", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
