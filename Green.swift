@@ -27,6 +27,7 @@ final class Figure {
     let name: String
     var alpha: CGFloat = 1
     var pose = Pose()
+    var isCrewmate = false     // the red Among Us crewmate is drawn as a bean, not a stick figure
 
     init(x: CGFloat, facing: CGFloat, color: NSColor, halo: NSColor? = nil, name: String) {
         self.x = x
@@ -129,6 +130,14 @@ final class StageView: NSView {
     private let chosen = Figure(x: -100, facing: 1, color: .black,
                                 halo: NSColor(calibratedWhite: 1, alpha: 0.9), name: "The Chosen One")
 
+    /// The red Among Us crewmate. He pops in, climbs the chocolate, punches them both, and walks off the screen.
+    private let crew: Figure = {
+        let f = Figure(x: 0, facing: -1, color: NSColor(calibratedRed: 0.77, green: 0.07, blue: 0.07, alpha: 1), name: "Red")
+        f.isCrewmate = true
+        f.alpha = 0
+        return f
+    }()
+
     private var scene = Scene.solo
     private var soloLeft = Int.random(in: 480...900)   // Green walks alone for a while first
     private var t = 0                                  // ticks into the current scene
@@ -170,7 +179,8 @@ final class StageView: NSView {
     var crashWanted = false
     private var upTicks = 0               // how long the real game has been in front
     // Eating Minecraft
-    private enum EatPhase { case walkIn, climb, topWalk, munch, burp, gone }
+    private enum EatPhase { case walkIn, climb, topWalk, crewVisit, munch, burp, gone }
+    private enum CrewStep { case spawn, run, climb, cross, hitChosen, hitGreen, goBack, descend, leave }
     private struct Crumb {
         var x: CGFloat
         var y: CGFloat
@@ -183,6 +193,9 @@ final class StageView: NSView {
     private var bites = 0                 // 6 bites and the whole icon is gone
     private var crumbs: [Crumb] = []
     private var shake: CGFloat = 0         // how hard the screen is shaking right now
+    private var crewStep = CrewStep.spawn
+    private var crewT = 0                  // ticks into the current crewmate step
+    private var knock: [CGFloat] = [0, 0]  // how far Green and the Chosen One are knocked back by a punch
     private var landT = [0, 0]             // how long each of them has been lying flat after landing
     private var flyV: [CGFloat] = [0, 0]   // how fast each of them is flying up from the big burp
     private let biteCount = 64   // a whole stack
@@ -244,6 +257,11 @@ final class StageView: NSView {
             crumbs = []
             flyV = [0, 0]
             landT = [0, 0]
+            crew.alpha = 0
+            crew.pose = Pose()
+            crewStep = .spawn
+            crewT = 0
+            knock = [0, 0]
             shake = 0
             status = ""
         }
@@ -756,7 +774,7 @@ final class StageView: NSView {
     }
 
     private func drawStatus() {
-        let big = status.contains("BURP") || status.contains("WHEE") || status.contains("THUMP")   // burps are written big, and they shake
+        let big = ["BURP", "WHEE", "THUMP", "BOW", "POW"].contains { status.contains($0) }   // burps are written big, and they shake
         let text = NSAttributedString(string: status, attributes: [
             .font: NSFont.boldSystemFont(ofSize: big ? 54 : 18),
             .foregroundColor: NSColor(calibratedWhite: 0.1, alpha: 1),
@@ -784,12 +802,14 @@ final class StageView: NSView {
             crumbs[i].life -= 1
         }
         crumbs.removeAll { $0.life <= 0 || $0.y < ground - 4 }
-        for f in [green, chosen] {
+        for f in [green, chosen, crew] {
             f.pose.punch = 0
             f.pose.hop = 0
             f.pose.cheer = false
             f.pose.climb = 0
         }
+        hit = max(0, hit - 0.06)
+        for i in knock.indices { knock[i] = knock[i] < 0.02 ? 0 : knock[i] * 0.9 }
         // As the chocolate gets lower, they sink down with it.
         func settle() {
             for f in [green, chosen] { f.pose.lift += (chocolateHeight - f.pose.lift) * 0.12 }
@@ -823,8 +843,12 @@ final class StageView: NSView {
             if b { chosen.facing = -1 }
             if a && b {
                 pt = 0
-                eatPhase = .munch
+                crewStep = .spawn
+                eatPhase = .crewVisit
             }
+
+        case .crewVisit:
+            crewVisit(cx: cx, side: side)
 
         case .munch:
             // They take turns: grab, bite, chew. 64 bites and the chocolate Minecraft is gone.
@@ -919,6 +943,109 @@ final class StageView: NSView {
                 eatPhase = .climb
             }
         }
+    }
+
+    /// The red crewmate pops in, climbs the chocolate, punches the Chosen One and then Green, and walks off the screen.
+    private func crewVisit(cx: CGFloat, side: CGFloat) {
+        crew.pose.walk = 0
+        // A punch lands: a burst, a loud word, and the one who got hit tips over backwards.
+        func landPunch(on victim: Figure, index: Int, word: String) {
+            knock[index] = 1
+            status = word
+            shake = 7
+            hit = 1
+            hitPoint = NSPoint(x: victim.x, y: ground + victim.pose.lift + 60)
+            NSSound(named: NSSound.Name("Funk"))?.play()
+        }
+        crewT += 1
+        switch crewStep {
+        case .spawn:
+            crew.x = cx + side + 90
+            crew.facing = -1
+            crew.alpha = 1
+            crew.pose = Pose()
+            NSSound(named: NSSound.Name("Pop"))?.play()
+            for _ in 0..<16 {   // a puff where he pops in
+                let shade = CGFloat.random(in: 0.85...1)
+                crumbs.append(Crumb(x: crew.x + CGFloat.random(in: -20...20), y: ground + CGFloat.random(in: 5...50),
+                                    vx: CGFloat.random(in: -1.5...1.5), vy: CGFloat.random(in: 0...1.5),
+                                    life: Int.random(in: 20...35),
+                                    color: NSColor(calibratedWhite: shade, alpha: 1)))
+            }
+            crewStep = .run
+
+        case .run:
+            if approach(crew, to: cx + side) { crewStep = .climb }
+
+        case .climb:
+            // Up the side of the chocolate, legs running.
+            crew.facing = -1
+            crew.pose.walk = 1
+            crew.pose.phase += 0.3
+            crew.pose.lift = min(chocolateHeight, crew.pose.lift + 1.6)
+            crew.pose.hop = abs(sin(crew.pose.phase)) * 3
+            if crew.pose.lift >= chocolateHeight { crewStep = .cross }
+
+        case .cross:
+            // Along the top, to stand between them.
+            if approach(crew, to: cx) {
+                crew.facing = 1
+                crewT = 0
+                crewStep = .hitChosen
+            }
+
+        case .hitChosen:
+            if crewT <= 24 { crew.pose.punch = sin(.pi * CGFloat(crewT) / 24) }
+            if crewT == 12 { landPunch(on: chosen, index: 1, word: "BOW!") }
+            if crewT >= 40 {
+                crew.facing = -1
+                crewT = 0
+                crewStep = .hitGreen
+            }
+
+        case .hitGreen:
+            if crewT <= 24 { crew.pose.punch = sin(.pi * CGFloat(crewT) / 24) }
+            if crewT == 12 { landPunch(on: green, index: 0, word: "POW!") }
+            if crewT >= 40 {
+                status = "Done!"
+                crewStep = .goBack
+            }
+
+        case .goBack:
+            if approach(crew, to: cx + side) {
+                status = ""
+                crewStep = .descend
+            }
+
+        case .descend:
+            // Back down the side.
+            crew.facing = -1
+            crew.pose.walk = 1
+            crew.pose.phase += 0.3
+            crew.pose.lift = max(0, crew.pose.lift - 2.2)
+            crew.pose.hop = abs(sin(crew.pose.phase)) * 3
+            if crew.pose.lift <= 0 { crewStep = .leave }
+
+        case .leave:
+            // Right off the side of the screen.
+            crew.facing = 1
+            crew.x += 3.2
+            crew.pose.phase += 0.2
+            crew.pose.walk = 1
+            if crew.x > bounds.width + 60 {
+                crew.alpha = 0
+                knock = [0, 0]
+                green.pose.fall = 0
+                chosen.pose.fall = 0
+                status = ""
+                pt = 0
+                crewStep = .spawn
+                eatPhase = .munch
+            }
+        }
+        // The two who got punched tip over backwards, then stand back up.
+        green.pose.fall = knock[0] * 0.7
+        chosen.pose.fall = knock[1] * 0.7
     }
 
     /// The landing: a loud thump, a puff of dust, and they lie flat.
@@ -1055,13 +1182,65 @@ final class StageView: NSView {
         if mode == .eat { drawCrumbs() }
         if green.alpha > 0 { draw(green) }
         if mode != .fight || scene == .approach || scene == .fight || scene == .aftermath { draw(chosen) }
+        if mode == .eat, crew.alpha > 0 { draw(crew) }
         if mode == .play, playPhase == .cheer || playPhase == .playing { drawMouse() }
         if mode == .play || mode == .eat, !status.isEmpty { drawStatus() }
         if hit > 0 { drawBurst(at: hitPoint, size: hit) }
         drawSparks()
     }
 
+    /// The red Among Us crewmate: a bean with a little backpack and a shiny blue visor.
+    private func drawCrewmate(_ f: Figure) {
+        let p = f.pose
+        NSGraphicsContext.saveGraphicsState()
+        defer { NSGraphicsContext.restoreGraphicsState() }
+        let move = NSAffineTransform()
+        move.translateX(by: f.x + f.facing * p.punch * 16, yBy: ground + p.lift + p.hop + sin(p.fall) * 20)
+        // Falling flat tips him over backwards. Cheering makes him wiggle.
+        move.rotate(byRadians: f.facing * p.fall + (p.cheer ? sin(p.phase * 2) * 0.15 : 0))
+        move.scaleX(by: f.facing, yBy: 1)
+        move.concat()
+
+        let red = NSColor(calibratedRed: 0.77, green: 0.07, blue: 0.07, alpha: f.alpha)
+        let dark = NSColor(calibratedRed: 0.55, green: 0.04, blue: 0.05, alpha: f.alpha)
+        let edge = NSColor(calibratedWhite: 0.1, alpha: f.alpha)
+        func fillAndEdge(_ path: NSBezierPath, _ fill: NSColor) {
+            fill.setFill()
+            path.fill()
+            edge.setStroke()
+            path.lineWidth = 3
+            path.stroke()
+        }
+
+        let swing = sin(p.phase) * p.walk
+        fillAndEdge(NSBezierPath(roundedRect: NSRect(x: -31, y: 22, width: 14, height: 26), xRadius: 6, yRadius: 6), dark)   // backpack
+        // legs
+        for (i, left) in [-22.0, 4.0].enumerated() {
+            let lift = max(0, (i == 0 ? swing : -swing)) * 6
+            fillAndEdge(NSBezierPath(roundedRect: NSRect(x: left, y: lift, width: 18, height: 24), xRadius: 7, yRadius: 7), red)
+        }
+        fillAndEdge(NSBezierPath(roundedRect: NSRect(x: -22, y: 14, width: 44, height: 50), xRadius: 22, yRadius: 22), red)
+        // visor
+        let visor = NSBezierPath(roundedRect: NSRect(x: 0, y: 38, width: 26, height: 17), xRadius: 8, yRadius: 8)
+        fillAndEdge(visor, NSColor(calibratedRed: 0.62, green: 0.85, blue: 0.95, alpha: f.alpha))
+        NSColor(calibratedWhite: 1, alpha: 0.8 * f.alpha).setFill()
+        NSBezierPath(roundedRect: NSRect(x: 9, y: 46, width: 11, height: 4), xRadius: 2, yRadius: 2).fill()
+
+        // the name, while standing up (drawn upright, so undo the flip)
+        if p.fall == 0 {
+            move.invert()
+            move.concat()
+            let label = NSAttributedString(string: f.name, attributes: [
+                .font: NSFont.boldSystemFont(ofSize: 11),
+                .foregroundColor: red,
+            ])
+            let size = label.size()
+            label.draw(at: NSPoint(x: f.x - size.width / 2, y: ground + p.lift + p.hop + 70))
+        }
+    }
+
     private func draw(_ f: Figure) {
+        if f.isCrewmate { drawCrewmate(f); return }
         let p = f.pose
         let c = cos(p.fall), s = sin(p.fall)
 
