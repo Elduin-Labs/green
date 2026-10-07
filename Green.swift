@@ -131,7 +131,9 @@ final class StageView: NSView {
     private var eatPhase = EatPhase.walkIn
     private var bites = 0                 // 6 bites and the whole icon is gone
     private var crumbs: [Crumb] = []
-    private var iconCenter: NSPoint { NSPoint(x: bounds.midX, y: ground + 26) }
+    private let biteCount = 10
+    private var iconSize: CGFloat { mode == .eat ? 110 : 44 }   // the chocolate one is big
+    private var iconCenter: NSPoint { NSPoint(x: bounds.midX, y: ground + iconSize / 2 + 4) }
 
     override var isFlipped: Bool { false }
 
@@ -726,8 +728,8 @@ final class StageView: NSView {
 
         switch eatPhase {
         case .walkIn:
-            let a = approach(green, to: cx - 45)
-            let b = approach(chosen, to: cx + 45)
+            let a = approach(green, to: cx - iconSize / 2 - 30)
+            let b = approach(chosen, to: cx + iconSize / 2 + 30)
             if a { green.facing = 1 }
             if b { chosen.facing = -1 }
             if a && b {
@@ -736,11 +738,11 @@ final class StageView: NSView {
             }
 
         case .munch:
-            // They take turns: grab, bite, chew. Six bites and the Minecraft icon is gone.
+            // They take turns: grab, bite, chew. Ten bites and the chocolate Minecraft is gone.
             green.pose.walk = 0
             chosen.pose.walk = 0
             let slot = pt / 40, beat = pt % 40
-            if slot >= 6 {
+            if slot >= biteCount {
                 pt = 0
                 eatPhase = .burp
                 return
@@ -752,10 +754,10 @@ final class StageView: NSView {
                 status = ["Nom!", "Chomp!", "Yum!"].randomElement() ?? "Nom!"
                 NSSound(named: NSSound.Name("Pop"))?.play()
                 let c = iconCenter
-                for _ in 0..<9 {
+                for _ in 0..<16 {
                     let color = Bool.random() ? NSColor(calibratedRed: 0.33, green: 0.17, blue: 0.08, alpha: 1)
                                               : NSColor(calibratedRed: 0.45, green: 0.25, blue: 0.12, alpha: 1)
-                    crumbs.append(Crumb(x: c.x + CGFloat.random(in: -10...10), y: c.y + CGFloat.random(in: -8...8),
+                    crumbs.append(Crumb(x: c.x + CGFloat.random(in: -iconSize / 2...iconSize / 2), y: c.y + CGFloat.random(in: -iconSize / 3...iconSize / 3),
                                         vx: CGFloat.random(in: -1.5...1.5), vy: CGFloat.random(in: 1...3.5),
                                         life: Int.random(in: 25...45), color: color))
                 }
@@ -798,7 +800,7 @@ final class StageView: NSView {
     /// The Minecraft icon: a little grass block with its name on top. Bites take pieces out of it.
     private func drawIcon(bites: Int = 0, chocolate: Bool = false) {
         let c = iconCenter
-        let size = 44 * (1 + 0.18 * iconPulse)
+        let size = iconSize * (1 + 0.18 * iconPulse)
         let rect = NSRect(x: c.x - size / 2, y: c.y - size / 2, width: size, height: size)
         let path = NSBezierPath(roundedRect: rect, xRadius: 6, yRadius: 6)
         NSColor(calibratedRed: 0.55, green: 0.38, blue: 0.22, alpha: 1).setFill()
@@ -807,12 +809,12 @@ final class StageView: NSView {
         NSGraphicsContext.saveGraphicsState()
         path.addClip()
         if chocolate {
-            // A chocolate bar: four squares, each with a lighter edge and a shiny corner.
-            let half = size / 2
-            for row in 0..<2 {
-                for col in 0..<2 {
-                    let square = NSRect(x: rect.minX + CGFloat(col) * half, y: rect.minY + CGFloat(row) * half,
-                                        width: half, height: half).insetBy(dx: 2.5, dy: 2.5)
+            // A chocolate bar: nine squares, each with a lighter edge and a shiny corner.
+            let cell = size / 3
+            for row in 0..<3 {
+                for col in 0..<3 {
+                    let square = NSRect(x: rect.minX + CGFloat(col) * cell, y: rect.minY + CGFloat(row) * cell,
+                                        width: cell, height: cell).insetBy(dx: 3, dy: 3)
                     NSColor(calibratedRed: 0.43, green: 0.23, blue: 0.11, alpha: 1).setFill()
                     NSBezierPath(roundedRect: square, xRadius: 3, yRadius: 3).fill()
                     NSColor(calibratedWhite: 1, alpha: 0.25).setFill()
@@ -828,12 +830,13 @@ final class StageView: NSView {
         path.lineWidth = 2
         path.stroke()
         if bites > 0 {
-            let spots: [NSPoint] = [NSPoint(x: -22, y: 16), NSPoint(x: 22, y: 14), NSPoint(x: -22, y: -14),
-                                    NSPoint(x: 22, y: -14), NSPoint(x: 0, y: 26), NSPoint(x: 0, y: -24)]
+            let spots: [NSPoint] = [NSPoint(x: -22, y: 22), NSPoint(x: 22, y: 22), NSPoint(x: -22, y: -22),
+                                    NSPoint(x: 22, y: -22), NSPoint(x: 0, y: 24), NSPoint(x: -24, y: 0),
+                                    NSPoint(x: 24, y: 0), NSPoint(x: 0, y: -24), NSPoint(x: -8, y: 6), NSPoint(x: 8, y: -6)]
             NSGraphicsContext.saveGraphicsState()
             NSGraphicsContext.current?.compositingOperation = .clear
             for spot in spots.prefix(bites) {
-                let r: CGFloat = 12 * size / 44
+                let r: CGFloat = 13 * size / 44
                 NSBezierPath(ovalIn: NSRect(x: c.x + spot.x * size / 44 - r, y: c.y + spot.y * size / 44 - r,
                                             width: r * 2, height: r * 2)).fill()
             }
@@ -855,7 +858,7 @@ final class StageView: NSView {
         dirtyRect.fill(using: .clear)
 
         if mode == .play, playPhase != .playing { drawIcon() }
-        if mode == .eat, bites < 6 { drawIcon(bites: bites, chocolate: true) }
+        if mode == .eat, bites < biteCount { drawIcon(bites: bites, chocolate: true) }
         if mode == .eat { drawCrumbs() }
         if green.alpha > 0 { draw(green) }
         if mode != .fight || scene == .approach || scene == .fight || scene == .aftermath { draw(chosen) }
