@@ -997,6 +997,7 @@ final class StageView: NSView {
             // Up the side of the chocolate, legs running.
             crew.facing = -1
             crew.pose.walk = 1
+            crew.pose.climb = 1
             crew.pose.phase += 0.3
             crew.pose.lift = min(chocolateHeight, crew.pose.lift + 1.6)
             crew.pose.hop = abs(sin(crew.pose.phase)) * 3
@@ -1037,6 +1038,7 @@ final class StageView: NSView {
             // Back down the side.
             crew.facing = -1
             crew.pose.walk = 1
+            crew.pose.climb = 1
             crew.pose.phase += 0.3
             crew.pose.lift = max(0, crew.pose.lift - 2.2)
             crew.pose.hop = abs(sin(crew.pose.phase)) * 3
@@ -1230,6 +1232,29 @@ final class StageView: NSView {
         }
 
         let swing = sin(p.phase) * p.walk
+        // Hands! One arm in front, one behind. They swing when he walks, reach up when he climbs or cheers, and punch.
+        func hand(_ side: CGFloat) -> NSPoint {
+            var x = 2 - swing * side * 9, y: CGFloat = 30
+            x += side * 3 * (1 - p.walk)
+            if p.climb > 0 { x = 16; y = 64 + sin(side == 1 ? p.phase : p.phase + .pi) * 6 }
+            if p.cheer { x = 12 + side * 8; y = 74 + sin(p.phase * 2 + side) * 3 }
+            if side == 1 && p.punch > 0 { x = 18 + 30 * p.punch; y = 40 }
+            return NSPoint(x: x, y: y)
+        }
+        func arm(_ side: CGFloat, _ color: NSColor) {
+            let h = hand(side)
+            let limb = NSBezierPath()
+            limb.lineCapStyle = .round
+            limb.move(to: NSPoint(x: side == 1 ? 8 : -4, y: 40))
+            limb.line(to: h)
+            edge.setStroke()
+            limb.lineWidth = 13
+            limb.stroke()
+            color.setStroke()
+            limb.lineWidth = 7
+            limb.stroke()
+        }
+        arm(-1, dark)   // the far arm, behind him
         fillAndEdge(NSBezierPath(roundedRect: NSRect(x: -31, y: 22, width: 14, height: 26), xRadius: 6, yRadius: 6), dark)   // backpack
         // legs
         for (i, left) in [-22.0, 4.0].enumerated() {
@@ -1260,6 +1285,7 @@ final class StageView: NSView {
         visor.stroke()
         NSColor(calibratedWhite: 1, alpha: 0.85 * f.alpha).setFill()
         NSBezierPath(roundedRect: NSRect(x: 8, y: 48, width: 14, height: 5), xRadius: 2.5, yRadius: 2.5).fill()
+        arm(1, red)     // the near arm, in front
 
         // the name, while standing up (drawn upright, so undo the flip)
         if p.fall == 0 {
