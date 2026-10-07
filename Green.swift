@@ -182,6 +182,7 @@ final class StageView: NSView {
     private var eatPhase = EatPhase.walkIn
     private var bites = 0                 // 6 bites and the whole icon is gone
     private var crumbs: [Crumb] = []
+    private var shake: CGFloat = 0         // how hard the screen is shaking right now
     private var landT = [0, 0]             // how long each of them has been lying flat after landing
     private var flyV: [CGFloat] = [0, 0]   // how fast each of them is flying up from the big burp
     private let biteCount = 64   // a whole stack
@@ -243,6 +244,7 @@ final class StageView: NSView {
             crumbs = []
             flyV = [0, 0]
             landT = [0, 0]
+            shake = 0
             status = ""
         }
         needsDisplay = true
@@ -774,6 +776,7 @@ final class StageView: NSView {
         let side = chocolateWidth / 2 + 14     // where they stand to climb: just outside the chocolate
         pt += 1
         iconPulse = max(0, iconPulse - 0.08)
+        shake = shake < 0.4 ? 0 : shake * 0.94
         for i in crumbs.indices {
             crumbs[i].x += crumbs[i].vx
             crumbs[i].y += crumbs[i].vy
@@ -865,6 +868,8 @@ final class StageView: NSView {
                 burp(pitch: 70, seconds: 1.5)
                 flyV = [15, 12]
             }
+            if (40..<80).contains(pt) { shake = max(shake, 5) }     // the burps rumble
+            if (100..<130).contains(pt) { shake = max(shake, 9) }
             if pt == 130 { status = "WHEEEE!" }
             if pt >= 100 {
                 for (i, f) in [green, chosen].enumerated() where f.pose.lift > 0 || flyV[i] > 0 {
@@ -919,6 +924,7 @@ final class StageView: NSView {
     /// The landing: a loud thump, a puff of dust, and they lie flat.
     private func thump(at f: Figure, index: Int) {
         landT[index] = 50
+        shake = 22
         status = "THUMP!"
         let sound = NSSound(data: makeThump())
         sound?.volume = 1
@@ -1034,6 +1040,15 @@ final class StageView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         dirtyRect.fill(using: .clear)
+
+        // Everything they draw shakes. (Other windows on the Mac can't be shaken from here.)
+        NSGraphicsContext.saveGraphicsState()
+        if shake > 0 {
+            let move = NSAffineTransform()
+            move.translateX(by: CGFloat.random(in: -shake...shake), yBy: CGFloat.random(in: -shake...shake))
+            move.concat()
+        }
+        defer { NSGraphicsContext.restoreGraphicsState() }
 
         if mode == .play, playPhase != .playing { drawIcon() }
         if mode == .eat { drawChocolate() }
