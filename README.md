@@ -12,7 +12,7 @@ Click **Green** in the menu bar to pick how they act:
 
 - **Fight**: they fight right away. The Chosen One shoots fire at Green, and throws a punch and a kick too. He wins, cheers, and walks home. A few seconds later he comes back and they fight again.
 - **Open Minecraft**: they walk up to a little Minecraft icon and Green clicks it twice. The real Minecraft launcher opens, and they cheer. Then they really play: once you press Play and open a world, Green works the keyboard (walk, jump) and the Chosen One holds a mouse (look around). They only press keys while the real game is the window in front.
-- **Eat Minecraft**: a giant bar of chocolate with Minecraft on it. They climb up the side, stand on top, and take turns biting it. Ten bites and it is gone, so they sink down to the ground. They burp, and a new one shows up.
+- **Eat Minecraft**: a giant bar of chocolate with Minecraft on it. They climb up the side, stand on top, and take turns biting it. 64 bites and it is gone, so they sink down to the ground. They burp, and a new one shows up.
 - **Walk together**: both walk across the middle of your screen.
 - **Stand in the middle**: both stand still.
 

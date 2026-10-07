@@ -133,7 +133,7 @@ final class StageView: NSView {
     private var eatPhase = EatPhase.walkIn
     private var bites = 0                 // 6 bites and the whole icon is gone
     private var crumbs: [Crumb] = []
-    private let biteCount = 10
+    private let biteCount = 64   // a whole stack
     private let chocolateWidth: CGFloat = 220
     private var chocolateFull: CGFloat { max(120, min(300, bounds.height - ground - 110)) }   // as tall as the screen allows
     private var chocolateHeight: CGFloat { chocolateFull * (1 - CGFloat(bites) / CGFloat(biteCount)) }
@@ -768,19 +768,19 @@ final class StageView: NSView {
             }
 
         case .munch:
-            // They take turns: grab, bite, chew. Ten bites and the chocolate Minecraft is gone.
+            // They take turns: grab, bite, chew. 64 bites and the chocolate Minecraft is gone.
             settle()
             green.pose.walk = 0
             chosen.pose.walk = 0
-            let slot = pt / 40, beat = pt % 40
+            let slot = pt / 30, beat = pt % 30
             if slot >= biteCount {
                 pt = 0
                 eatPhase = .burp
                 return
             }
             let eater = slot % 2 == 0 ? green : chosen
-            eater.pose.punch = sin(.pi * CGFloat(beat) / 40)
-            if beat == 20 {
+            eater.pose.punch = sin(.pi * CGFloat(beat) / 30)
+            if beat == 15 {
                 let top = ground + 4 + chocolateHeight
                 bites += 1
                 status = ["Nom!", "Chomp!", "Yum!"].randomElement() ?? "Nom!"
@@ -793,8 +793,8 @@ final class StageView: NSView {
                                         life: Int.random(in: 25...45), color: color))
                 }
             }
-            if beat > 20 { eater.pose.hop = abs(sin(CGFloat(beat) * 0.5)) * 4 }   // chewing
-            if beat == 38 { status = "" }
+            if beat > 15 { eater.pose.hop = abs(sin(CGFloat(beat) * 0.5)) * 4 }   // chewing
+            if beat == 28 { status = "" }
 
         case .burp:
             // Full tummies.
