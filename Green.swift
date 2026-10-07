@@ -91,7 +91,7 @@ final class StageView: NSView {
 
     // Opening Minecraft
     private enum PlayPhase { case walkIn, click, cheer, playing }
-    private enum Act { case rest, walk, leap, look, dig }
+    private enum Act { case rest, walk, leap, look, dig, crash }
     private var playPhase = PlayPhase.walkIn
     private var pt = 0
     private var launched = false          // the real Minecraft has been opened this time round
@@ -112,6 +112,11 @@ final class StageView: NSView {
     var clicksAllowed = false
     private let keyW: CGKeyCode = 13
     private let keySpace: CGKeyCode = 49
+    private let keyF3: CGKeyCode = 99
+    private let keyC: CGKeyCode = 8
+    /// Holding F3 and C together for ten seconds is Minecraft's own "crash the game on purpose" shortcut.
+    var crashWanted = false
+    private var upTicks = 0               // how long the real game has been in front
     private var iconCenter: NSPoint { NSPoint(x: bounds.midX, y: ground + 26) }
 
     override var isFlipped: Bool { false }
@@ -534,6 +539,7 @@ final class StageView: NSView {
         case .leap: actLeft = Int.random(in: 120...200)
         case .look: actLeft = Int.random(in: 40...100)
         case .dig: actLeft = Int.random(in: 90...160)
+        case .crash: actLeft = 780
         }
         lookDir = Bool.random() ? 1 : -1
     }
@@ -551,6 +557,7 @@ final class StageView: NSView {
             f.pose.cheer = false
             f.pose.hop = 0
             f.pose.punch = 0
+            f.pose.stance = 0
         }
         chosen.pose.punch = 0.3          // his arm is out, holding the mouse
         chosen.pose.punchArm = 1
@@ -567,6 +574,15 @@ final class StageView: NSView {
         }
         if !minecraftIsUp {
             releaseAll()
+            upTicks = 0
+            if act == .crash {
+                // The game is gone. They did it!
+                crashWanted = false
+                act = .rest
+                pt = 0
+                playPhase = .cheer
+                return
+            }
             act = .rest
             actLeft = 0
             status = "Press Play in Minecraft, then open a world!"
@@ -574,9 +590,21 @@ final class StageView: NSView {
         }
         status = ""
 
+        if crashWanted && act != .crash {
+            upTicks += 1
+            if upTicks > 300 {      // after a few seconds of playing, they go for it
+                releaseAll()
+                act = .crash
+                actLeft = 780
+            }
+        }
         actLeft -= 1
         if actLeft <= 0 {
             releaseAll()
+            if act == .crash {      // it did not crash. Stop trying.
+                crashWanted = false
+                upTicks = 0
+            }
             chooseAct()
         }
         switch act {
@@ -595,6 +623,15 @@ final class StageView: NSView {
             look(dx: lookDir * 7)
             mouseSlide = CGFloat(lookDir) * sin(CGFloat(pt) * 0.2) * 9
             chosen.pose.phase += 0.1
+        case .crash:
+            // Green holds F3, the Chosen One holds C, and they strain until the game gives up.
+            setKey(keyF3, true)
+            setKey(keyC, true)
+            for f in [green, chosen] {
+                f.pose.stance = 1
+                f.pose.hop = CGFloat.random(in: 0...3)
+            }
+            status = "Breaking Minecraft..."
         case .dig:
             setMouseButton(clicksAllowed)
             mouseClick = 1
@@ -822,6 +859,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         sender.state = view.clicksAllowed ? .on : .off
     }
 
+    @objc func crashIt(_ sender: NSMenuItem) {
+        view.crashWanted = true
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         view.releaseAll()   // never leave a key or the mouse button stuck down in the game
     }
@@ -842,6 +883,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         view = StageView(frame: NSRect(origin: .zero, size: frame.size))
         // `open Green.app --args play` starts them off opening Minecraft.
         if CommandLine.arguments.contains("dig") { view.clicksAllowed = true }   // `--args play dig` also lets them break blocks
+        if CommandLine.arguments.contains("crash") { view.crashWanted = true }   // `--args play crash`
         if CommandLine.arguments.contains("play") { view.mode = .play }
         window.contentView = view
         window.orderFrontRegardless()
@@ -872,6 +914,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         clicks.target = self
         clicks.state = view.clicksAllowed ? .on : .off
         menu.addItem(clicks)
+        let crash = NSMenuItem(title: "Crash Minecraft", action: #selector(crashIt(_:)), keyEquivalent: "")
+        crash.target = self
+        menu.addItem(crash)
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Quit Green", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         statusItem.menu = menu

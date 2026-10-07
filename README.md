@@ -30,4 +30,6 @@ To press keys and move the mouse in Minecraft, Green needs the Mac's OK: **Syste
 
 The menu item **Let them click (only inside a world)** lets the Chosen One dig by holding the mouse button. It is off by default, because in a menu a click could press the wrong button.
 
+The menu item **Crash Minecraft** makes them hold F3 and C together. Minecraft crashes on purpose after about ten seconds of that. Save your world first: anything you haven't saved is lost.
+
 Made by Elduin. Mac only. A fan project, not made by or connected to Alan Becker.
