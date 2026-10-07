@@ -196,10 +196,13 @@ final class StageView: NSView {
     private var crumbs: [Crumb] = []
     private var shake: CGFloat = 0         // how hard the screen is shaking right now
     // Hardcore: once they are knocked out, they do not come back.
-    private enum HardcorePhase { case stroll, chaseGreen, hitGreen, chaseChosen, hitChosen, cheer, done }
+    private enum HardcorePhase { case stroll, chaseGreen, hitGreen, fightBack, crewDown, chase, kill, cheer, done }
     private var hcPhase = HardcorePhase.stroll
     private var hcT = 0
     private var deathT = [0, 0]                 // ticks since Green / the Chosen One were knocked out. 0 = still alive.
+    private var crewDeathT = 0                  // ticks since the crewmate was knocked out. 0 = still alive.
+    private var crewKnock: CGFloat = 0          // how far the crewmate is rocked back by a hit
+    private var kills = 0                       // how many of them are gone for good
     private var graves: [(x: CGFloat, name: String)] = []
     private var spawnX: CGFloat { margin + 40 } // where the crewmate respawns
     private var crewStep = CrewStep.spawn
@@ -268,6 +271,11 @@ final class StageView: NSView {
             hcPhase = .stroll
             hcT = 0
             deathT = [0, 0]
+            crewDeathT = 0
+            crewKnock = 0
+            kills = 0
+            knock = [0, 0]
+            sparks = []
             graves = []
             crumbs = []
             shake = 0
@@ -554,7 +562,11 @@ final class StageView: NSView {
             sparks[i].vy += 0.04          // flames drift upward
             sparks[i].life -= 1
             // When the fire reaches Green it splashes on him and climbs up.
-            if scene == .fight, (green.x - sparks[i].x) * chosen.facing < 4, sparks[i].vx * chosen.facing > 1 {
+            if mode == .hardcore, crew.alpha > 0, (crew.x - sparks[i].x) * chosen.facing < 4, sparks[i].vx * chosen.facing > 1 {
+                sparks[i].vx *= 0.15
+                sparks[i].vy = CGFloat.random(in: 0.8...2)
+            }
+            if mode == .fight, (green.x - sparks[i].x) * chosen.facing < 4, sparks[i].vx * chosen.facing > 1 {
                 sparks[i].vx *= 0.15
                 sparks[i].vy = CGFloat.random(in: 0.8...2)
             }
@@ -1002,12 +1014,13 @@ final class StageView: NSView {
         }
     }
 
-    /// Hardcore: the crewmate pops in at his spawn point, knocks out Green and then the Chosen One, and they are gone for good.
-    /// Then he respawns at his spawn point.
+    /// Hardcore. The crewmate pops in at his spawn point and punches Green. They fight back, and he is knocked out.
+    /// He respawns at his spawn point, comes back, and this time they are knocked out for good.
     private func hardcoreStep() {
         hcT += 1
         hit = max(0, hit - 0.06)
         shake = shake < 0.4 ? 0 : shake * 0.94
+        moveSparks()
         for i in crumbs.indices {
             crumbs[i].x += crumbs[i].vx
             crumbs[i].y += crumbs[i].vy
@@ -1015,12 +1028,16 @@ final class StageView: NSView {
             crumbs[i].life -= 1
         }
         crumbs.removeAll { $0.life <= 0 || $0.y < ground - 4 }
-        crew.pose.punch = 0
-        crew.pose.hop = 0
-        crew.pose.cheer = false
-        crew.pose.walk = 0
+        for f in [green, chosen, crew] {
+            f.pose.punch = 0
+            f.pose.hop = 0
+            f.pose.cheer = false
+            f.pose.walk = 0
+        }
+        for i in knock.indices { knock[i] = knock[i] < 0.02 ? 0 : knock[i] * 0.9 }
+        crewKnock = crewKnock < 0.02 ? 0 : crewKnock * 0.9
 
-        // The ones who got knocked out fall flat, fade away, and leave a gravestone.
+        // The ones who got knocked out for good fall flat, fade away, and leave a gravestone.
         for (i, f) in [green, chosen].enumerated() where deathT[i] > 0 {
             deathT[i] += 1
             f.pose.fall = min(.pi / 2, CGFloat(deathT[i]) * 0.09)
@@ -1029,9 +1046,23 @@ final class StageView: NSView {
                 if f.alpha == 0, !graves.contains(where: { $0.name == f.name }) { graves.append((f.x, f.name)) }
             }
         }
-        // The ones still standing turn to face him.
-        if hcPhase != .stroll {
-            for (i, f) in [green, chosen].enumerated() where deathT[i] == 0 { f.facing = sign(crew.x - f.x) }
+        // The ones still standing wobble when hit, and turn to face him.
+        for (i, f) in [green, chosen].enumerated() where deathT[i] == 0 {
+            f.pose.fall = knock[i] * 0.7
+            if hcPhase != .stroll { f.facing = sign(crew.x - f.x) }
+        }
+        // The crewmate wobbles when hit. When he is knocked out he falls flat and fades, but he comes back.
+        if crewDeathT > 0 {
+            crewDeathT += 1
+            crew.pose.fall = min(.pi / 2, CGFloat(crewDeathT) * 0.09)
+            if crewDeathT > 60 { crew.alpha = max(0, crew.alpha - 0.03) }
+        } else {
+            crew.pose.fall = crewKnock * 0.6
+        }
+
+        func nextVictim() -> Int? {
+            let alive = [0, 1].filter { deathT[$0] == 0 }
+            return alive.min { [green, chosen][$0].x < [green, chosen][$1].x }
         }
         func run(to x: CGFloat) -> Bool {
             let d = x - crew.x
@@ -1042,12 +1073,11 @@ final class StageView: NSView {
             crew.pose.walk = 1
             return false
         }
-        func punchOn(_ victim: Figure, index: Int, word: String) {
-            deathT[index] = 1
-            status = word
-            shake = 10
+        func landed(on point: NSPoint, word: String = "") {
+            if !word.isEmpty { status = word }
+            shake = 8
             hit = 1
-            hitPoint = NSPoint(x: victim.x, y: ground + 60)
+            hitPoint = point
             NSSound(named: NSSound.Name("Funk"))?.play()
         }
 
@@ -1067,17 +1097,89 @@ final class StageView: NSView {
             if run(to: green.x - 34) { hcT = 0; hcPhase = .hitGreen }
 
         case .hitGreen:
+            // His first punch. It knocks Green back, but he does not go down.
             if hcT <= 24 { crew.pose.punch = sin(.pi * CGFloat(hcT) / 24) }
-            if hcT == 12 { punchOn(green, index: 0, word: "BOW!") }
-            if hcT >= 50 { status = ""; hcPhase = .chaseChosen }
+            if hcT == 12 {
+                knock[0] = 1
+                landed(on: NSPoint(x: green.x - 15, y: ground + 55), word: "BOW!")
+            }
+            if hcT >= 45 { status = "They fight back!"; hcT = 0; hcPhase = .fightBack }
 
-        case .chaseChosen:
-            if run(to: chosen.x - 34) { hcT = 0; hcPhase = .hitChosen }
+        case .fightBack:
+            // The Chosen One walks around to the other side of the crewmate and shoots fire at him.
+            // Green punches him. He punches back. In the end, the crewmate goes down.
+            let spot = crew.x - 90
+            let arrived = approach(chosen, to: spot)
+            if arrived && hcT >= 40 && hcT < 165 {
+                chosen.pose.punch = min(1, CGFloat(hcT - 40) / 8)
+                if (hcT / 18) % 2 == 0 { shootFire(amount: 3) }
+                for _ in 0..<1 {   // flames lick up around him
+                    addSpark(x: crew.x + CGFloat.random(in: -14...14), y: ground + CGFloat.random(in: 10...60),
+                             vx: CGFloat.random(in: -0.3...0.3), vy: CGFloat.random(in: 0.8...2))
+                }
+                crew.pose.hop = CGFloat.random(in: 0...5)
+                crewKnock = max(crewKnock, 0.35)
+            }
+            // Green punches him every little while, and gets punched back.
+            if hcT < 165 {
+                let beat = hcT % 36
+                green.pose.punchArm = (hcT / 36) % 2 == 0 ? 1 : -1
+                green.pose.punch = sin(.pi * CGFloat(beat) / 36) * 0.8
+                crew.pose.punch = sin(.pi * CGFloat((hcT + 18) % 36) / 36) * 0.8
+                if beat == 18 {
+                    crewKnock = 1
+                    crew.x = max(margin, crew.x - 4)
+                    landed(on: NSPoint(x: crew.x + 18, y: ground + 45))
+                }
+                if (hcT + 18) % 36 == 18 { knock[0] = max(knock[0], 0.5) }
+            }
+            if hcT >= 165 {
+                // The crewmate goes down.
+                crewDeathT = 1
+                shake = 12
+                status = "Oof!"
+                hcT = 0
+                hcPhase = .crewDown
+            }
 
-        case .hitChosen:
+        case .crewDown:
+            // They cheer. Then he respawns at his spawn point.
+            for (i, f) in [green, chosen].enumerated() where deathT[i] == 0 {
+                f.pose.cheer = true
+                f.pose.phase += 0.3
+                f.pose.hop = abs(sin(CGFloat(hcT) * 0.25)) * 6
+                _ = i
+            }
+            if crew.alpha == 0 {
+                puff(at: spawnX)
+                crew.x = spawnX
+                crew.facing = 1
+                crew.pose = Pose()
+                crew.alpha = 1
+                crewDeathT = 0
+                crewKnock = 0
+                NSSound(named: NSSound.Name("Pop"))?.play()
+                status = "Respawned!"
+                hcT = 0
+                hcPhase = .chase
+            }
+
+        case .chase:
+            // Back he comes. This time they cannot stop him.
+            if hcT == 90 { status = "" }
+            guard let i = nextVictim() else { hcT = 0; status = "GG!"; hcPhase = .cheer; break }
+            if run(to: [green, chosen][i].x - 34) { hcT = 0; hcPhase = .kill }
+
+        case .kill:
+            guard let i = nextVictim() else { hcT = 0; hcPhase = .chase; break }
+            let victim = [green, chosen][i]
             if hcT <= 24 { crew.pose.punch = sin(.pi * CGFloat(hcT) / 24) }
-            if hcT == 12 { punchOn(chosen, index: 1, word: "POW!") }
-            if hcT >= 60 { hcT = 0; status = "GG!"; hcPhase = .cheer }
+            if hcT == 12 {
+                deathT[i] = 1
+                kills += 1
+                landed(on: NSPoint(x: victim.x - 15, y: ground + 60), word: kills == 1 ? "BOW!" : "POW!")
+            }
+            if hcT >= 55 { status = ""; hcT = 0; hcPhase = .chase }
 
         case .cheer:
             crew.pose.cheer = true
