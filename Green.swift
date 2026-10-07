@@ -195,6 +195,7 @@ final class StageView: NSView {
     private var bites = 0                 // 6 bites and the whole icon is gone
     private var crumbs: [Crumb] = []
     private var shake: CGFloat = 0         // how hard the screen is shaking right now
+    private var greetT = 240                // Green says hi for the first 4 seconds after he starts
     // Hardcore: once they are knocked out, they do not come back.
     private enum HardcorePhase { case stroll, chaseGreen, hitGreen, fightBack, crewDown, chase, kill, cheer, done }
     private var hcPhase = HardcorePhase.stroll
@@ -333,6 +334,10 @@ final class StageView: NSView {
     }
 
     func step() {
+        if greetT > 0 {
+            greetT -= 1
+            needsDisplay = true   // so the hello still shows when everyone is standing still
+        }
         switch mode {
         case .stand: return
         case .walk:
@@ -1493,6 +1498,33 @@ final class StageView: NSView {
         if mode == .play || mode == .eat || mode == .hardcore, !status.isEmpty { drawStatus() }
         if hit > 0 { drawBurst(at: hitPoint, size: hit) }
         drawSparks()
+        if greetT > 0, green.alpha > 0, mode != .crewTop { drawGreeting() }
+    }
+
+    /// A little speech bubble over Green's head that says hi, then fades away.
+    private func drawGreeting() {
+        let fade = min(1, CGFloat(greetT) / 40)
+        let text = NSAttributedString(string: "Hi Elduin!", attributes: [
+            .font: NSFont.boldSystemFont(ofSize: 18),
+            .foregroundColor: NSColor(calibratedRed: 0.05, green: 0.5, blue: 0.1, alpha: fade),
+        ])
+        let size = text.size()
+        let bob = sin(CGFloat(greetT) * 0.15) * 3
+        let bubble = NSRect(x: green.x - size.width / 2 - 12, y: ground + 150 + bob, width: size.width + 24, height: size.height + 12)
+        let path = NSBezierPath(roundedRect: bubble, xRadius: 12, yRadius: 12)
+        NSColor(calibratedWhite: 1, alpha: 0.95 * fade).setFill()
+        path.fill()
+        NSColor(calibratedRed: 0.10, green: 0.85, blue: 0.20, alpha: fade).setStroke()
+        path.lineWidth = 3
+        path.stroke()
+        // the little tail that points down at Green
+        let tail = NSBezierPath()
+        tail.move(to: NSPoint(x: green.x - 7, y: bubble.minY + 1))
+        tail.line(to: NSPoint(x: green.x, y: bubble.minY - 10))
+        tail.line(to: NSPoint(x: green.x + 7, y: bubble.minY + 1))
+        NSColor(calibratedWhite: 1, alpha: 0.95 * fade).setFill()
+        tail.fill()
+        text.draw(at: NSPoint(x: bubble.minX + 12, y: bubble.minY + 6))
     }
 
     /// The red Among Us crewmate: a bean with a little backpack and a shiny blue visor.
